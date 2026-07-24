@@ -26,9 +26,12 @@ create table if not exists public.reviews (
   restaurant_id text not null references public.restaurants(id) on delete cascade,
   author text not null,
   content text not null,
+  rating integer not null default 0 check (rating between 0 and 5),
   password_hash text not null,
   created_at timestamptz not null default now()
 );
+
+alter table public.reviews add column if not exists rating integer not null default 0 check (rating between 0 and 5);
 
 alter table public.restaurants enable row level security;
 alter table public.posts enable row level security;
@@ -60,10 +63,13 @@ create index if not exists restaurants_distance_idx on public.restaurants (dista
 create index if not exists posts_created_at_idx on public.posts (created_at desc);
 create index if not exists reviews_restaurant_id_idx on public.reviews (restaurant_id, created_at desc);
 
+drop function if exists public.update_review(text, text, text, text);
+
 create or replace function public.update_review(
   p_id text,
   p_author text,
   p_content text,
+  p_rating integer,
   p_password_hash text
 ) returns boolean
 language plpgsql
@@ -72,7 +78,7 @@ set search_path = public
 as $$
 begin
   update public.reviews
-  set author = p_author, content = p_content
+  set author = p_author, content = p_content, rating = p_rating
   where id = p_id and password_hash = p_password_hash;
   return found;
 end;
@@ -93,7 +99,7 @@ begin
 end;
 $$;
 
-grant execute on function public.update_review(text, text, text, text) to anon, authenticated;
+grant execute on function public.update_review(text, text, text, integer, text) to anon, authenticated;
 grant execute on function public.delete_review(text, text) to anon, authenticated;
 
 insert into public.restaurants
