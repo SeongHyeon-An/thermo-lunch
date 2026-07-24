@@ -20,6 +20,7 @@ type Post = {
   title: string;
   content: string;
   author: string;
+  password_hash?: string;
   created_at: string;
   views: number;
 };
@@ -146,8 +147,8 @@ const seedRestaurants: Restaurant[] = [
 ];
 
 const seedPosts: Post[] = [
-  { id: "p1", title: "점심 번개 같이 가실 분?", content: "오늘 11시 40분에 로즈데일 쪽으로 가려고 합니다. 메뉴 추천도 받아요!", author: "수서미식가", created_at: "2026-07-24T02:20:00.000Z", views: 12 },
-  { id: "p2", title: "새로 생긴 식당 발견하면 여기 남겨주세요", content: "상호와 대략적인 위치만 적어주셔도 목록에 반영하기 쉬워요.", author: "관리자", created_at: "2026-07-23T07:10:00.000Z", views: 28 },
+  { id: "p1", title: "점심 번개 같이 가실 분?", content: "오늘 11시 40분에 로즈데일 쪽으로 가려고 합니다. 메뉴 추천도 받아요!", author: "수서미식가", password_hash: ADMIN_PASSWORD_HASH, created_at: "2026-07-24T02:20:00.000Z", views: 12 },
+  { id: "p2", title: "새로 생긴 식당 발견하면 여기 남겨주세요", content: "상호와 대략적인 위치만 적어주셔도 목록에 반영하기 쉬워요.", author: "관리자", password_hash: ADMIN_PASSWORD_HASH, created_at: "2026-07-23T07:10:00.000Z", views: 28 },
 ];
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -187,6 +188,7 @@ export default function Home() {
   const [showRestaurantForm, setShowRestaurantForm] = useState(false);
   const [showPostForm, setShowPostForm] = useState(false);
   const [editing, setEditing] = useState<Restaurant | null>(null);
+  const [editingPost, setEditingPost] = useState<Post | null>(null);
   const [editingReview, setEditingReview] = useState<Review | null>(null);
   const [reviewFormOpen, setReviewFormOpen] = useState(false);
   const [showAdminLogin, setShowAdminLogin] = useState(false);
@@ -198,7 +200,7 @@ export default function Home() {
     if (!isConnected) return;
     Promise.all([
       supabaseRequest("restaurants?select=*&order=distance.asc"),
-      supabaseRequest("posts?select=*&order=created_at.desc"),
+      supabaseRequest("posts?select=id,title,content,author,created_at,views&order=created_at.desc"),
       supabaseRequest("reviews?select=id,restaurant_id,author,content,rating,created_at&order=created_at.desc"),
     ]).then(([restaurantRows, postRows, reviewRows]) => {
       if (restaurantRows?.length) setRestaurants(restaurantRows);
@@ -362,35 +364,83 @@ export default function Home() {
   async function savePost(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    const post: Post = {
-      id: crypto.randomUUID(),
-      title: String(form.get("title") || ""),
-      content: String(form.get("content") || ""),
-      author: String(form.get("author") || "익명"),
-      created_at: new Date().toISOString(),
-      views: 0,
-    };
+    const title = String(form.get("title") || "").trim();
+    const content = String(form.get("content") || "").trim();
+    const author = String(form.get("author") || "익명").trim();
+    const passwordHash = await hashText(String(form.get("password") || ""));
     try {
-      if (isConnected) await supabaseRequest("posts", { method: "POST", body: JSON.stringify(post) });
-      setPosts((items) => [post, ...items]);
+      if (editingPost) {
+        if (isConnected) {
+          const updated = await supabaseRequest("rpc/update_post", {
+            method: "POST",
+            body: JSON.stringify({ p_id: editingPost.id, p_author: author, p_title: title, p_content: content, p_password_hash: passwordHash }),
+          });
+          if (!updated) return setNotice("비밀번호가 맞지 않아요.");
+        } else if (editingPost.password_hash !== passwordHash) {
+          return setNotice("비밀번호가 맞지 않아요.");
+        }
+        setPosts((items) => items.map((post) => post.id === editingPost.id ? { ...post, title, content, author } : post));
+        setNotice("게시글을 수정했어요.");
+      } else {
+        const post: Post = {
+          id: crypto.randomUUID(),
+          title,
+          content,
+          author,
+          password_hash: passwordHash,
+          created_at: new Date().toISOString(),
+          views: 0,
+        };
+        if (isConnected) await supabaseRequest("posts", { method: "POST", body: JSON.stringify(post) });
+        setPosts((items) => [post, ...items]);
+        setNotice("게시글을 등록했어요.");
+      }
       setShowPostForm(false);
-      setNotice("게시글을 등록했어요.");
+      setEditingPost(null);
     } catch {
       setNotice("게시글을 저장하지 못했어요.");
     }
   }
 
-  async function removePost(id: string) {
-    if (!isAdmin) return setShowAdminLogin(true);
+  async function removePost(post: Post) {
     if (!window.confirm("이 게시글을 삭제할까요?")) return;
     try {
-      if (isConnected) await supabaseRequest(`posts?id=eq.${id}`, { method: "DELETE" });
-      setPosts((items) => items.filter((post) => post.id !== id));
+      if (isAdmin) {
+        if (isConnected) await supabaseRequest(`posts?id=eq.${post.id}`, { method: "DELETE" });
+      } else {
+        const password = window.prompt("글 작성 시 입력한 비밀번호를 입력해 주세요.");
+        if (!password) return;
+        const passwordHash = await hashText(password);
+        if (isConnected) {
+          const removed = await supabaseRequest("rpc/delete_post", {
+            method: "POST",
+            body: JSON.stringify({ p_id: post.id, p_password_hash: passwordHash }),
+          });
+          if (!removed) return setNotice("비밀번호가 맞지 않아요.");
+        } else if (post.password_hash !== passwordHash) {
+          return setNotice("비밀번호가 맞지 않아요.");
+        }
+      }
+      setPosts((items) => items.filter((item) => item.id !== post.id));
+      if (editingPost?.id === post.id) {
+        setEditingPost(null);
+        setShowPostForm(false);
+      }
       setNotice("게시글을 삭제했어요.");
     } catch {
       setNotice("게시글을 삭제하지 못했어요.");
     }
   }
+
+  const openNewPost = () => {
+    setEditingPost(null);
+    setShowPostForm(true);
+  };
+
+  const openPostEdit = (post: Post) => {
+    setEditingPost(post);
+    setShowPostForm(true);
+  };
 
   const openEdit = (item: Restaurant) => {
     setEditing(item);
@@ -436,7 +486,7 @@ export default function Home() {
             <div className="heroCopy">
               <p className="eyebrow">OFFICE LUNCH DIRECTORY</p>
               <h1>점메추 <em>in 써모</em></h1>
-              <p className="heroText">광평로 281을 중심으로 동료들이 함께 채우는 수서 맛집 지도예요.</p>
+              <p className="heroText">수서오피스를 중심으로 동료들이 함께 채우는 맛집 리스트에요.</p>
               <div className="searchBox">
                 <span aria-hidden="true">⌕</span>
                 <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="식당, 메뉴, 메모를 검색해 보세요" aria-label="맛집 검색" />
@@ -530,19 +580,22 @@ export default function Home() {
               <h1>자유게시판</h1>
               <p>점심 번개, 새 맛집 제보, 솔직한 후기를 편하게 나눠요.</p>
             </div>
-            <button className="lightButton" onClick={() => setShowPostForm(true)}>＋ 새 글 쓰기</button>
+            <button className="lightButton" onClick={openNewPost}>＋ 새 글 쓰기</button>
           </div>
           <div className="boardWrap">
             <div className="boardTitle">
               <div><h2>최근 이야기</h2><p>총 {posts.length}개의 이야기</p></div>
-              <button className="primaryButton mobileWrite" onClick={() => setShowPostForm(true)}>글쓰기</button>
+              <button className="primaryButton mobileWrite" onClick={openNewPost}>글쓰기</button>
             </div>
             <div className="postList">
               {posts.map((post, index) => (
                 <article className="post" key={post.id}>
                   <span className="postNumber">{String(posts.length - index).padStart(2, "0")}</span>
                   <div className="postMain"><h3>{post.title}</h3><p>{post.content}</p><div className="postMeta"><span>{post.author}</span><span>{formatDate(post.created_at)}</span><span>조회 {post.views}</span></div></div>
-                  {isAdmin ? <button className="iconButton" onClick={() => removePost(post.id)} aria-label={`${post.title} 삭제`}>×</button> : <span />}
+                  <div className="postActions">
+                    <button onClick={() => openPostEdit(post)}>수정</button>
+                    <button className="danger" onClick={() => removePost(post)}>삭제</button>
+                  </div>
                 </article>
               ))}
             </div>
@@ -627,15 +680,21 @@ export default function Home() {
       )}
 
       {showPostForm && (
-        <div className="modalBackdrop" onMouseDown={(event) => event.target === event.currentTarget && setShowPostForm(false)}>
-          <section className="modal formModal" role="dialog" aria-modal="true" aria-label="새 글 쓰기">
-            <button className="modalClose" onClick={() => setShowPostForm(false)} aria-label="닫기">×</button>
-            <p className="eyebrow dark">NEW STORY</p><h2>새 글 쓰기</h2>
+        <div className="modalBackdrop" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) {
+            setShowPostForm(false);
+            setEditingPost(null);
+          }
+        }}>
+          <section className="modal formModal" role="dialog" aria-modal="true" aria-label={editingPost ? "게시글 수정" : "새 글 쓰기"}>
+            <button className="modalClose" onClick={() => { setShowPostForm(false); setEditingPost(null); }} aria-label="닫기">×</button>
+            <p className="eyebrow dark">{editingPost ? "EDIT STORY" : "NEW STORY"}</p><h2>{editingPost ? "게시글 수정" : "새 글 쓰기"}</h2>
             <form onSubmit={savePost}>
-              <label>작성자<input name="author" required placeholder="이름 또는 별명" /></label>
-              <label>제목<input name="title" required placeholder="어떤 이야기를 나눌까요?" /></label>
-              <label>내용<textarea name="content" required rows={6} placeholder="자유롭게 적어주세요." /></label>
-              <button className="primaryButton submitButton" type="submit">게시글 등록</button>
+              <label>작성자<input name="author" required defaultValue={editingPost?.author} placeholder="이름 또는 별명" /></label>
+              <label>비밀번호<input name="password" type="password" required placeholder={editingPost ? "작성할 때 사용한 비밀번호" : "수정·삭제할 때 사용해요"} /></label>
+              <label>제목<input name="title" required defaultValue={editingPost?.title} placeholder="어떤 이야기를 나눌까요?" /></label>
+              <label>내용<textarea name="content" required rows={6} defaultValue={editingPost?.content} placeholder="자유롭게 적어주세요." /></label>
+              <button className="primaryButton submitButton" type="submit">{editingPost ? "수정 저장" : "게시글 등록"}</button>
             </form>
           </section>
         </div>

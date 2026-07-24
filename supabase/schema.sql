@@ -17,6 +17,7 @@ create table if not exists public.posts (
   title text not null,
   content text not null,
   author text not null default '익명',
+  password_hash text not null default 'c7680b18671c306147e947131d5a66e56f5a07c6a5de74d2d7773b48412ea24d',
   created_at timestamptz not null default now(),
   views integer not null default 0
 );
@@ -32,6 +33,7 @@ create table if not exists public.reviews (
 );
 
 alter table public.reviews add column if not exists rating integer not null default 0 check (rating between 0 and 5);
+alter table public.posts add column if not exists password_hash text not null default 'c7680b18671c306147e947131d5a66e56f5a07c6a5de74d2d7773b48412ea24d';
 alter table public.restaurants drop constraint if exists restaurants_distance_check;
 alter table public.restaurants add constraint restaurants_distance_check check (distance >= 0);
 
@@ -101,8 +103,44 @@ begin
 end;
 $$;
 
+create or replace function public.update_post(
+  p_id text,
+  p_author text,
+  p_title text,
+  p_content text,
+  p_password_hash text
+) returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update public.posts
+  set author = p_author, title = p_title, content = p_content
+  where id = p_id and password_hash = p_password_hash;
+  return found;
+end;
+$$;
+
+create or replace function public.delete_post(
+  p_id text,
+  p_password_hash text
+) returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  delete from public.posts
+  where id = p_id and password_hash = p_password_hash;
+  return found;
+end;
+$$;
+
 grant execute on function public.update_review(text, text, text, integer, text) to anon, authenticated;
 grant execute on function public.delete_review(text, text) to anon, authenticated;
+grant execute on function public.update_post(text, text, text, text, text) to anon, authenticated;
+grant execute on function public.delete_post(text, text) to anon, authenticated;
 
 insert into public.restaurants
   (id, name, category, building, address, floor, distance, rating, note, tags)
