@@ -75,8 +75,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .primaryButton { background: var(--orange); color: white; box-shadow: 0 8px 20px rgba(243,107,61,.18); }
 .primaryButton:hover, .lightButton:hover { transform: translateY(-2px); }
 .sectionActions { display: flex; gap: 9px; }
-.randomButton { border: 1px solid var(--green); background: transparent; color: var(--green); border-radius: 10px; padding: 12px 17px; font-weight: 800; font-size: 12px; }
-.randomButton:hover { background: var(--green); color: white; }
+.randomPickRow { display: flex; justify-content: center; margin: 34px 0 6px; }
+.randomButton { min-width: 260px; border: 0; background: var(--green); color: white; border-radius: 999px; padding: 17px 30px; font-weight: 900; font-size: 16px; letter-spacing: -.01em; box-shadow: 0 12px 28px rgba(20,61,48,.22); transition: transform .2s, background .2s, box-shadow .2s; }
+.randomButton:hover { background: #205b49; transform: translateY(-2px); box-shadow: 0 16px 34px rgba(20,61,48,.28); }
 .secondaryButton { background: #edf0ea; color: var(--ink); }
 .secondaryButton.danger { color: #b74730; }
 .lightButton { background: var(--lime); color: var(--green); }
@@ -231,8 +232,10 @@ footer small { grid-column: 2; color: rgba(255,255,255,.35); font-size: 10px; }
   .heroStats div { padding-right: 16px; }
   .restaurantGrid { grid-template-columns: 1fr; }
   .sectionHead { align-items: start; flex-direction: column; }
-  .sectionActions { width: 100%; display: grid; grid-template-columns: 1fr 1fr; }
-  .sectionHead .primaryButton, .randomButton { width: 100%; }
+  .sectionActions { width: 100%; }
+  .sectionHead .primaryButton { width: 100%; }
+  .randomPickRow { margin-top: 28px; }
+  .randomButton { width: 100%; }
   .selects select { min-width: 0; width: 50%; }
   .boardHero { min-height: 310px; padding-top: 55px; }
   .boardHero .lightButton { display: none; }

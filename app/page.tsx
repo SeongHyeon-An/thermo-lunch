@@ -435,7 +435,7 @@ export default function Home() {
           <section className="hero">
             <div className="heroCopy">
               <p className="eyebrow">OFFICE LUNCH DIRECTORY</p>
-              <h1>오늘 점심,<br /><em>가까운 곳부터.</em></h1>
+              <h1>점메추 <em>in 써모</em></h1>
               <p className="heroText">광평로 281을 중심으로 동료들이 함께 채우는 수서 맛집 지도예요.</p>
               <div className="searchBox">
                 <span aria-hidden="true">⌕</span>
@@ -458,9 +458,12 @@ export default function Home() {
                 <p>{filtered.length}곳을 찾았어요 · 초기 정보는 방문 전 확인해 주세요</p>
               </div>
               <div className="sectionActions">
-                <button className="randomButton" onClick={pickRandomRestaurant}>↻ 오늘 뭐 먹지?</button>
                 <button className="primaryButton" onClick={() => requireAdmin(() => { setEditing(null); setShowRestaurantForm(true); })}>＋ 식당 추가</button>
               </div>
+            </div>
+
+            <div className="randomPickRow">
+              <button className="randomButton" onClick={pickRandomRestaurant}>↻ 랜덤뽑기</button>
             </div>
 
             <div className="toolbar">
