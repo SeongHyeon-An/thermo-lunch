@@ -43,6 +43,43 @@ const CATEGORY_PHOTOS: Record<string, string> = {
   양식: "https://images.unsplash.com/photo-1625643263399-2c6c860a583f?auto=format&fit=crop&w=900&q=78",
   기타: "https://images.unsplash.com/photo-1515823662972-da6a2e4d3002?auto=format&fit=crop&w=900&q=78",
 };
+const RESTAURANT_PHOTOS: Record<string, string> = {
+  r1: "https://d12zq4w4guyljn.cloudfront.net/750_750_20260312012430274_photo_.webp",
+  r2: "https://d12zq4w4guyljn.cloudfront.net/750_750_20251028013848_photo1_b4762f00408c.webp",
+  r3: "https://d12zq4w4guyljn.cloudfront.net/750_750_20250826001723_photo1_4c8f2d0c7a9b.webp",
+  r4: "https://d12zq4w4guyljn.cloudfront.net/750_750_20201121131640_photo1_pWpyRZAUvccH.webp",
+  r6: "https://d12zq4w4guyljn.cloudfront.net/750_750_20260307143502_photo1_fe4411605ada.webp",
+  r7: "https://d12zq4w4guyljn.cloudfront.net/750_750_20240527095815_photo1_6ddefe95c889.webp",
+  r8: "https://d12zq4w4guyljn.cloudfront.net/750_750_20230701115607873_photo_dea771de1115.webp",
+  r9: "https://d12zq4w4guyljn.cloudfront.net/750_750_20251205073649470_photo_a0fababd222c.webp",
+  r10: "https://d12zq4w4guyljn.cloudfront.net/750_750_20251004002300_photo1_hkRAhLEW5gil.webp",
+  r12: "https://d12zq4w4guyljn.cloudfront.net/750_750_20251204002727_photo1_172b41b9d6a5.webp",
+  r14: "https://d12zq4w4guyljn.cloudfront.net/750_750_20260227080320363_photo_24585c8e1d1a.webp",
+  r15: "https://d12zq4w4guyljn.cloudfront.net/750_750_20250404063604_photo1_172b41b9d6a5.webp",
+  r16: "https://d12zq4w4guyljn.cloudfront.net/750_750_20260401110939_photo1_3b14a0a776a9.webp",
+  a01: "https://d12zq4w4guyljn.cloudfront.net/750_750_20260219063040106_photo_a0fababd222c.webp",
+  a02: "https://d12zq4w4guyljn.cloudfront.net/750_750_20251121110919_photo1_16b95099b083.webp",
+  a03: "https://d12zq4w4guyljn.cloudfront.net/750_750_20250225010943_photo1_172b41b9d6a5.webp",
+  a04: "https://d12zq4w4guyljn.cloudfront.net/750_750_20260322094537_photo1_1b27d7f85552.webp",
+  a06: "https://d12zq4w4guyljn.cloudfront.net/750_750_20250825010530_photo1_175bfe5fc0e5.webp",
+  a08: "https://d12zq4w4guyljn.cloudfront.net/750_750_20250508085731086_photo_39953508d1f5.webp",
+  a09: "https://d12zq4w4guyljn.cloudfront.net/750_750_20250204120857_photo1_172b41b9d6a5.webp",
+  a11: "https://d12zq4w4guyljn.cloudfront.net/750_750_20240310060241_photo1_60cdb9cdc3f5.webp",
+  a15: "https://d12zq4w4guyljn.cloudfront.net/750_750_20260328082539714_photo_0caf5de8a3e4.webp",
+  a17: "https://d12zq4w4guyljn.cloudfront.net/750_750_20260101143740_photo1_172b41b9d6a5.webp",
+  a19: "https://d12zq4w4guyljn.cloudfront.net/750_750_20251019194204_profile_photo1_a2e1b1990f36.webp",
+  a20: "https://d12zq4w4guyljn.cloudfront.net/750_750_20240407112845_photo1_0606f2bc4179.webp",
+  a21: "https://d12zq4w4guyljn.cloudfront.net/750_750_20260505025732_photo1_5b7e5d6beeda.webp",
+  a22: "https://d12zq4w4guyljn.cloudfront.net/750_750_20230506175414_profile_photo1_a2e1b1990f36.webp",
+  a23: "https://d12zq4w4guyljn.cloudfront.net/750_750_20251014213242_photo1_172b41b9d6a5.webp",
+  a28: "https://d12zq4w4guyljn.cloudfront.net/750_750_20250124133459_photo1_a2e1b1990f36.webp",
+  a29: "https://d12zq4w4guyljn.cloudfront.net/750_750_20250811114218_photo1_e1c95d040167.webp",
+  a32: "https://d12zq4w4guyljn.cloudfront.net/750_750_20260420221654_photo1_a2e1b1990f36.webp",
+  a33: "https://d12zq4w4guyljn.cloudfront.net/750_750_20260522091138287_photo_bb7366057614.webp",
+  a34: "https://d12zq4w4guyljn.cloudfront.net/750_750_20250204234055_photo1_172b41b9d6a5.webp",
+  a36: "https://d12zq4w4guyljn.cloudfront.net/750_750_20240810160045_photo1_a2e1b1990f36.webp",
+  a38: "https://d12zq4w4guyljn.cloudfront.net/750_750_20260415101501498_photo_88b0f2635c8e.webp",
+};
 
 async function hashText(value: string) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
@@ -447,7 +484,17 @@ export default function Home() {
                   return (
                   <article className="restaurantCard" key={item.id} onClick={() => openRestaurant(item)}>
                     <div className={`cardVisual tone${index % 5}`}>
-                      <img className="cardPhoto" src={CATEGORY_PHOTOS[item.category] || CATEGORY_PHOTOS.기타} alt={`${item.category} 대표 음식`} loading="lazy" onError={(event) => { event.currentTarget.style.display = "none"; }} />
+                      <img
+                        className="cardPhoto"
+                        src={RESTAURANT_PHOTOS[item.id] || CATEGORY_PHOTOS[item.category] || CATEGORY_PHOTOS.기타}
+                        alt={RESTAURANT_PHOTOS[item.id] ? `${item.name} 매장 대표 사진` : `${item.category} 대표 음식`}
+                        loading="lazy"
+                        onError={(event) => {
+                          if (event.currentTarget.dataset.fallback) return;
+                          event.currentTarget.dataset.fallback = "true";
+                          event.currentTarget.src = CATEGORY_PHOTOS[item.category] || CATEGORY_PHOTOS.기타;
+                        }}
+                      />
                       <span>{item.category}</span>
                       <div className="foodGlyph" aria-hidden="true">{["◒", "◉", "◍", "◎", "◐"][index % 5]}</div>
                       <small>{item.building}</small>
