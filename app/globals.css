@@ -41,10 +41,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .hero h1, .boardHero h1 { font-family: Georgia, "Times New Roman", serif; font-size: clamp(56px, 7vw, 94px); line-height: .98; letter-spacing: -.06em; margin: 0; font-weight: 500; }
 .hero h1 em { color: var(--lime); font-style: italic; }
 .heroText { max-width: 460px; color: rgba(255,255,255,.72); font-size: 17px; line-height: 1.7; margin: 26px 0; word-break: keep-all; }
-.searchBox { height: 58px; border-radius: 13px; background: white; display: flex; align-items: center; max-width: 530px; color: var(--ink); padding: 0 18px; gap: 12px; box-shadow: 0 12px 40px rgba(3,14,9,.18); }
-.searchBox > span { font-size: 26px; line-height: 1; transform: rotate(-18deg); }
+.searchBox { width: min(530px, 100%); height: 58px; border-radius: 13px; background: white; display: flex; align-items: center; color: var(--ink); padding: 0 18px; gap: 12px; box-shadow: 0 12px 40px rgba(3,14,9,.18); }
 .searchBox input { flex: 1; border: 0; outline: 0; min-width: 0; }
-.searchBox button { border: 0; background: #eef0e9; border-radius: 50%; width: 24px; height: 24px; }
+.searchBox button { border: 0; border-radius: 50%; flex: 0 0 auto; }
+.searchBox .searchSubmit { width: 32px; height: 32px; background: var(--green); color: white; font-size: 24px; line-height: 1; transform: rotate(-18deg); }
+.searchBox .searchClear { width: 24px; height: 24px; background: #eef0e9; color: var(--ink); }
+.searchResultLink { margin-top: 14px; border: 0; background: transparent; color: var(--lime); font-size: 13px; font-weight: 900; text-decoration: underline; text-underline-offset: 4px; }
 .heroStats { display: flex; gap: 30px; margin-top: 28px; }
 .heroStats div { display: flex; flex-direction: column; padding-right: 30px; border-right: 1px solid rgba(255,255,255,.14); }
 .heroStats div:last-child { border: 0; }

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type Restaurant = {
   id: string;
@@ -194,6 +194,7 @@ export default function Home() {
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [notice, setNotice] = useState("");
+  const restaurantResultsRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     setIsAdmin(sessionStorage.getItem("suseo-admin") === "1");
@@ -235,6 +236,10 @@ export default function Home() {
   }, [restaurants, query, category, sort, ratingStats]);
 
   const selectedReviews = useMemo(() => reviews.filter((review) => review.restaurant_id === selected?.id), [reviews, selected]);
+
+  const showSearchResults = () => {
+    restaurantResultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   function requireAdmin(action: () => void) {
     if (isAdmin) action();
@@ -487,11 +492,12 @@ export default function Home() {
               <p className="eyebrow">OFFICE LUNCH DIRECTORY</p>
               <h1>점메추 <em>in 써모</em></h1>
               <p className="heroText">수서오피스를 중심으로 동료들이 함께 채우는 맛집 리스트에요.</p>
-              <div className="searchBox">
-                <span aria-hidden="true">⌕</span>
+              <form className="searchBox" onSubmit={(event) => { event.preventDefault(); showSearchResults(); }}>
+                <button className="searchSubmit" type="submit" aria-label="검색 결과 보기">⌕</button>
                 <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="식당, 메뉴, 메모를 검색해 보세요" aria-label="맛집 검색" />
-                {query && <button onClick={() => setQuery("")} aria-label="검색어 지우기">×</button>}
-              </div>
+                {query && <button className="searchClear" type="button" onClick={() => setQuery("")} aria-label="검색어 지우기">×</button>}
+              </form>
+              {query.trim() && <button className="searchResultLink" onClick={showSearchResults}>검색 결과 {filtered.length}곳 보기 ↓</button>}
               <div className="heroStats">
                 <div><strong>{restaurants.length}</strong><span>등록 맛집</span></div>
                 <div><strong>{restaurants.filter((item) => item.distance <= 500).length}</strong><span>도보권</span></div>
@@ -500,7 +506,7 @@ export default function Home() {
             </div>
           </section>
 
-          <section className="directory">
+          <section className="directory" ref={restaurantResultsRef}>
             <div className="sectionHead">
               <div>
                 <p className="eyebrow dark">NEARBY PICKS</p>
