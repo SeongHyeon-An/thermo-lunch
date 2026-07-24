@@ -74,6 +74,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .primaryButton, .secondaryButton, .lightButton { border: 0; border-radius: 10px; padding: 13px 20px; font-weight: 800; font-size: 13px; transition: transform .2s, background .2s; }
 .primaryButton { background: var(--orange); color: white; box-shadow: 0 8px 20px rgba(243,107,61,.18); }
 .primaryButton:hover, .lightButton:hover { transform: translateY(-2px); }
+.sectionActions { display: flex; gap: 9px; }
+.randomButton { border: 1px solid var(--green); background: transparent; color: var(--green); border-radius: 10px; padding: 12px 17px; font-weight: 800; font-size: 12px; }
+.randomButton:hover { background: var(--green); color: white; }
 .secondaryButton { background: #edf0ea; color: var(--ink); }
 .secondaryButton.danger { color: #b74730; }
 .lightButton { background: var(--lime); color: var(--green); }
@@ -87,10 +90,13 @@ select { border: 1px solid var(--line); border-radius: 9px; background: white; p
 .restaurantCard { border: 1px solid var(--line); background: white; border-radius: 17px; overflow: hidden; cursor: pointer; transition: transform .23s, box-shadow .23s; min-width: 0; }
 .restaurantCard:hover { transform: translateY(-5px); box-shadow: 0 18px 40px rgba(35,48,39,.1); }
 .cardVisual { height: 138px; padding: 16px; position: relative; overflow: hidden; color: rgba(23,33,27,.7); }
-.cardVisual > span { background: rgba(255,255,255,.74); border-radius: 99px; padding: 5px 9px; font-size: 10px; font-weight: 800; }
-.cardVisual small { position: absolute; left: 16px; bottom: 14px; font-weight: 800; font-size: 10px; letter-spacing: .03em; }
+.cardPhoto { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; transition: transform .35s; }
+.restaurantCard:hover .cardPhoto { transform: scale(1.04); }
+.cardVisual::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,18,13,.05), rgba(10,18,13,.62)); z-index: 1; }
+.cardVisual > span { position: relative; z-index: 2; background: rgba(255,255,255,.86); border-radius: 99px; padding: 5px 9px; font-size: 10px; font-weight: 800; }
+.cardVisual small { position: absolute; z-index: 2; left: 16px; bottom: 14px; color: white; text-shadow: 0 1px 5px rgba(0,0,0,.45); font-weight: 800; font-size: 10px; letter-spacing: .03em; }
 .tone0 { background: #f2c759; }.tone1 { background: #b9d4ad; }.tone2 { background: #eab0a0; }.tone3 { background: #b8cbd9; }.tone4 { background: #d8ccaa; }
-.foodGlyph { position: absolute; font-family: Georgia, serif; font-size: 130px; line-height: 1; color: rgba(255,255,255,.64); right: -3px; bottom: -33px; transform: rotate(-12deg); text-shadow: 0 10px 20px rgba(34,44,37,.08); }
+.foodGlyph { position: absolute; z-index: 0; font-family: Georgia, serif; font-size: 130px; line-height: 1; color: rgba(255,255,255,.64); right: -3px; bottom: -33px; transform: rotate(-12deg); text-shadow: 0 10px 20px rgba(34,44,37,.08); }
 .cardBody { padding: 18px; }
 .cardTop { display: flex; justify-content: space-between; font-size: 10px; }
 .distance { color: var(--muted); }
@@ -225,7 +231,8 @@ footer small { grid-column: 2; color: rgba(255,255,255,.35); font-size: 10px; }
   .heroStats div { padding-right: 16px; }
   .restaurantGrid { grid-template-columns: 1fr; }
   .sectionHead { align-items: start; flex-direction: column; }
-  .sectionHead .primaryButton { width: 100%; }
+  .sectionActions { width: 100%; display: grid; grid-template-columns: 1fr 1fr; }
+  .sectionHead .primaryButton, .randomButton { width: 100%; }
   .selects select { min-width: 0; width: 50%; }
   .boardHero { min-height: 310px; padding-top: 55px; }
   .boardHero .lightButton { display: none; }
