@@ -30,9 +30,14 @@ type Review = {
   restaurant_id: string;
   author: string;
   content: string;
-  rating: number;
   password_hash?: string;
   created_at: string;
+};
+
+type RatingSummary = {
+  restaurant_id: string;
+  average: number;
+  count: number;
 };
 
 const ADMIN_PASSWORD_HASH = "c7680b18671c306147e947131d5a66e56f5a07c6a5de74d2d7773b48412ea24d";
@@ -181,6 +186,7 @@ export default function Home() {
   const [restaurants, setRestaurants] = useState<Restaurant[]>(seedRestaurants);
   const [posts, setPosts] = useState<Post[]>(seedPosts);
   const [reviews, setReviews] = useState<Review[]>([]);
+  const [ratingSummaries, setRatingSummaries] = useState<RatingSummary[]>([]);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("전체");
   const [sort, setSort] = useState("distance");
@@ -191,6 +197,7 @@ export default function Home() {
   const [editingPost, setEditingPost] = useState<Post | null>(null);
   const [editingReview, setEditingReview] = useState<Review | null>(null);
   const [reviewFormOpen, setReviewFormOpen] = useState(false);
+  const [ratingFormOpen, setRatingFormOpen] = useState(false);
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [notice, setNotice] = useState("");
@@ -202,11 +209,13 @@ export default function Home() {
     Promise.all([
       supabaseRequest("restaurants?select=*&order=distance.asc"),
       supabaseRequest("posts?select=id,title,content,author,created_at,views&order=created_at.desc"),
-      supabaseRequest("reviews?select=id,restaurant_id,author,content,rating,created_at&order=created_at.desc"),
-    ]).then(([restaurantRows, postRows, reviewRows]) => {
+      supabaseRequest("reviews?select=id,restaurant_id,author,content,created_at&order=created_at.desc"),
+      supabaseRequest("rpc/get_rating_summaries", { method: "POST", body: "{}" }),
+    ]).then(([restaurantRows, postRows, reviewRows, ratingRows]) => {
       if (restaurantRows?.length) setRestaurants(restaurantRows);
       if (postRows?.length) setPosts(postRows);
       if (reviewRows?.length) setReviews(reviewRows);
+      if (ratingRows?.length) setRatingSummaries(ratingRows);
     }).catch(() => setNotice("데이터 연결을 확인하지 못해 이 기기의 데모 목록을 보여드려요."));
   }, []);
 
@@ -218,14 +227,11 @@ export default function Home() {
 
   const ratingStats = useMemo(() => {
     const stats: Record<string, { average: number; count: number }> = {};
-    for (const review of reviews) {
-      if (!review.rating) continue;
-      const current = stats[review.restaurant_id] || { average: 0, count: 0 };
-      const total = current.average * current.count + review.rating;
-      stats[review.restaurant_id] = { average: total / (current.count + 1), count: current.count + 1 };
+    for (const summary of ratingSummaries) {
+      stats[summary.restaurant_id] = { average: Number(summary.average), count: Number(summary.count) };
     }
     return stats;
-  }, [reviews]);
+  }, [ratingSummaries]);
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -317,7 +323,6 @@ export default function Home() {
     const form = new FormData(event.currentTarget);
     const author = String(form.get("author") || "").trim();
     const content = String(form.get("content") || "").trim();
-    const rating = Number(form.get("rating") || 0);
     const passwordHash = await hashText(String(form.get("password") || ""));
 
     try {
@@ -325,17 +330,17 @@ export default function Home() {
         if (isConnected) {
           const updated = await supabaseRequest("rpc/update_review", {
             method: "POST",
-            body: JSON.stringify({ p_id: editingReview.id, p_author: author, p_content: content, p_rating: rating, p_password_hash: passwordHash }),
+            body: JSON.stringify({ p_id: editingReview.id, p_author: author, p_content: content, p_password_hash: passwordHash }),
           });
           if (!updated) return setNotice("비밀번호가 맞지 않아요.");
         } else if (editingReview.password_hash !== passwordHash) {
           return setNotice("비밀번호가 맞지 않아요.");
         }
-        setReviews((items) => items.map((review) => review.id === editingReview.id ? { ...review, author, content, rating } : review));
+        setReviews((items) => items.map((review) => review.id === editingReview.id ? { ...review, author, content } : review));
         setEditingReview(null);
         setNotice("리뷰를 수정했어요.");
       } else {
-        const review: Review = { id: crypto.randomUUID(), restaurant_id: selected.id, author, content, rating, password_hash: passwordHash, created_at: new Date().toISOString() };
+        const review: Review = { id: crypto.randomUUID(), restaurant_id: selected.id, author, content, password_hash: passwordHash, created_at: new Date().toISOString() };
         if (isConnected) await supabaseRequest("reviews", { method: "POST", body: JSON.stringify(review) });
         setReviews((items) => [review, ...items]);
         setNotice("리뷰를 남겼어요.");
@@ -344,6 +349,40 @@ export default function Home() {
       event.currentTarget.reset();
     } catch {
       setNotice("리뷰를 저장하지 못했어요.");
+    }
+  }
+
+  async function saveRating(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selected) return;
+    const form = new FormData(event.currentTarget);
+    const author = String(form.get("author") || "").trim();
+    const password = String(form.get("password") || "");
+    const rating = Number(form.get("rating") || 0);
+    const voterHash = await hashText(`${author.toLocaleLowerCase("ko-KR")}:${password}`);
+
+    try {
+      if (isConnected) {
+        const result = await supabaseRequest("rpc/save_rating", {
+          method: "POST",
+          body: JSON.stringify({ p_restaurant_id: selected.id, p_author: author, p_rating: rating, p_voter_hash: voterHash }),
+        });
+        const summary = result?.[0];
+        if (summary) {
+          setRatingSummaries((items) => [
+            ...items.filter((item) => item.restaurant_id !== selected.id),
+            { restaurant_id: selected.id, average: Number(summary.average), count: Number(summary.count) },
+          ]);
+        }
+      } else {
+        setNotice("별점 저장은 공용 데이터가 연결된 사이트에서 사용할 수 있어요.");
+        return;
+      }
+      setRatingFormOpen(false);
+      event.currentTarget.reset();
+      setNotice("별점을 반영했어요. 같은 이름과 비밀번호로 다시 주면 기존 별점이 변경돼요.");
+    } catch {
+      setNotice("별점을 저장하지 못했어요.");
     }
   }
 
@@ -457,6 +496,7 @@ export default function Home() {
     setSelected(item);
     setEditingReview(null);
     setReviewFormOpen(false);
+    setRatingFormOpen(false);
   };
 
   const pickRandomRestaurant = () => {
@@ -622,7 +662,24 @@ export default function Home() {
               <div className="detailTags"><span>{selected.category}</span>{selected.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
               <p className="detailNote">{selected.note || "아직 식당 소개가 없어요."}</p>
               <div className="addressBox"><span>위치</span><b>{selected.address}</b><small>{selected.floor}</small></div>
-              <div className="averageBox"><span>사용자 평균</span><b>★ {ratingStats[selected.id] ? ratingStats[selected.id].average.toFixed(1) : "평가 전"}</b><small>{ratingStats[selected.id]?.count || 0}개의 평가</small></div>
+              <div className="averageBox">
+                <span>사용자 평균</span>
+                <b>★ {ratingStats[selected.id] ? ratingStats[selected.id].average.toFixed(1) : "평가 전"}</b>
+                <small>{ratingStats[selected.id]?.count || 0}개의 평가</small>
+                <button className="ratingToggleButton" onClick={() => setRatingFormOpen((open) => !open)}>{ratingFormOpen ? "별점 입력 접기" : "별점 주기"}</button>
+              </div>
+              {ratingFormOpen && <form className="ratingForm" onSubmit={saveRating}>
+                <p>별점은 한 사람당 식당별 1개만 반영돼요. 같은 이름과 비밀번호로 다시 제출하면 기존 별점이 변경됩니다.</p>
+                <div className="reviewFormRow">
+                  <label>이름<input name="author" required placeholder="이름 또는 별명" /></label>
+                  <label>비밀번호<input name="password" type="password" required minLength={4} placeholder="내 별점 확인용" /></label>
+                </div>
+                <fieldset className="ratingField">
+                  <legend>별점</legend>
+                  <div>{[5, 4, 3, 2, 1].map((value) => <label key={value}><input type="radio" name="rating" value={value} required /><span>★</span></label>)}</div>
+                </fieldset>
+                <div className="reviewFormActions"><button className="primaryButton" type="submit">별점 저장</button></div>
+              </form>}
 
               {isAdmin && <div className="adminDrawerActions"><button className="secondaryButton danger" onClick={() => removeRestaurant(selected)}>식당 삭제</button><button className="primaryButton" onClick={() => openEdit(selected)}>식당 정보 수정</button></div>}
 
@@ -636,10 +693,6 @@ export default function Home() {
                     <label>이름<input name="author" required defaultValue={editingReview?.author} placeholder="이름 또는 별명" /></label>
                     <label>비밀번호<input name="password" type="password" required minLength={4} placeholder="수정·삭제 시 필요" /></label>
                   </div>
-                  <fieldset className="ratingField">
-                    <legend>별점</legend>
-                    <div>{[5, 4, 3, 2, 1].map((value) => <label key={value}><input type="radio" name="rating" value={value} required defaultChecked={(editingReview?.rating || 0) === value} /><span>★</span></label>)}</div>
-                  </fieldset>
                   <label>메모<textarea name="content" required rows={3} defaultValue={editingReview?.content} placeholder="추천 메뉴, 대기 시간, 분위기 등을 알려주세요." /></label>
                   <div className="reviewFormActions">
                     {editingReview && <button type="button" className="secondaryButton" onClick={() => { setEditingReview(null); setReviewFormOpen(false); }}>수정 취소</button>}
@@ -649,7 +702,7 @@ export default function Home() {
                 <div className="reviewList">
                   {selectedReviews.length ? selectedReviews.map((review) => (
                     <article className="reviewItem" key={review.id}>
-                      <div className="reviewMeta"><b>{review.author}</b><span><i>★ {review.rating || "-"}</i> · {formatDate(review.created_at)}</span></div>
+                      <div className="reviewMeta"><b>{review.author}</b><span>{formatDate(review.created_at)}</span></div>
                       <p>{review.content}</p>
                       <div className="reviewActions"><button onClick={() => { setEditingReview(review); setReviewFormOpen(true); }}>수정</button><button onClick={() => removeReview(review)}>삭제</button></div>
                     </article>

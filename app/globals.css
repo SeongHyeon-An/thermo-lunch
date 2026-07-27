@@ -196,6 +196,12 @@ footer small { grid-column: 2; color: rgba(255,255,255,.35); font-size: 10px; }
 .averageBox span { color: var(--muted); font-size: 11px; }
 .averageBox b { color: var(--orange); font-family: Georgia, serif; font-size: 22px; }
 .averageBox small { grid-column: 2; text-align: right; color: #979d98; font-size: 9px; }
+.ratingToggleButton { grid-column: 1 / -1; justify-self: stretch; margin-top: 8px; border: 1px solid #d8ddd8; background: white; color: var(--green); border-radius: 8px; padding: 10px 12px; font-size: 11px; font-weight: 800; }
+.ratingForm { margin: -4px 0 20px; background: #f4f5ed; border-radius: 14px; padding: 16px; display: grid; gap: 12px; animation: reviewDrop .2s ease-out; transform-origin: top; }
+.ratingForm > p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
+.ratingForm label { display: grid; gap: 6px; font-size: 10px; color: var(--muted); font-weight: 800; }
+.ratingForm input { width: 100%; border: 1px solid #d9d9cf; background: white; color: var(--ink); border-radius: 8px; padding: 10px 11px; }
+.ratingForm .ratingField input { position: absolute; opacity: 0; pointer-events: none; }
 .rateBox { display: flex; align-items: center; justify-content: space-between; padding: 18px 0; }
 .rateBox button { border: 0; background: transparent; color: #d4d6cf; font-size: 25px; padding: 2px; }
 .rateBox button.filled { color: #ef7548; }
