@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
@@ -39,6 +39,8 @@ type RatingSummary = {
   average: number;
   count: number;
 };
+
+type ConnectionStatus = "loading" | "connected" | "partial" | "offline";
 
 const ADMIN_PASSWORD_HASH = "c7680b18671c306147e947131d5a66e56f5a07c6a5de74d2d7773b48412ea24d";
 const CATEGORY_TABS = ["전체", "한식", "중식", "양식", "일식", "기타"];
@@ -92,70 +94,6 @@ async function hashText(value: string) {
   return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-const seedRestaurants: Restaurant[] = [
-  { id: "r1", name: "우리집순두부", category: "한식", building: "현대벤처빌", address: "서울 강남구 밤고개로1길 10", floor: "지하 식당가", distance: 160, rating: 0, note: "순두부와 한식 메뉴. 혼밥하기 편한 곳으로 알려져 있어요.", tags: ["혼밥", "찌개"] },
-  { id: "r2", name: "스미식당 수서역점", category: "일식", building: "현대벤처빌", address: "서울 강남구 밤고개로1길 10", floor: "지하 1층 132호", distance: 160, rating: 0, note: "덮밥과 카레 메뉴 중심.", tags: ["덮밥", "혼밥"] },
-  { id: "r3", name: "미소야 수서점", category: "일식", building: "현대벤처빌", address: "서울 강남구 밤고개로1길 10", floor: "지하 식당가", distance: 160, rating: 0, note: "돈카츠, 우동 등 다양한 일식 메뉴.", tags: ["돈카츠", "우동"] },
-  { id: "r4", name: "황금식탁", category: "한식", building: "현대벤처빌", address: "서울 강남구 밤고개로1길 10", floor: "지하 1층", distance: 160, rating: 0, note: "낙지볶음과 닭요리 중심.", tags: ["낙지", "점심"] },
-  { id: "r5", name: "포 수서점", category: "기타", building: "현대벤처빌", address: "서울 강남구 밤고개로1길 10", floor: "지하 2층 B203호", distance: 170, rating: 0, note: "쌀국수와 베트남식 덮밥.", tags: ["쌀국수", "혼밥"] },
-  { id: "r6", name: "큰물참치 수서점", category: "일식", building: "현대벤처빌", address: "서울 강남구 밤고개로1길 10", floor: "상가", distance: 160, rating: 0, note: "참치회와 일식 식사.", tags: ["참치", "회식"] },
-  { id: "r7", name: "치마오", category: "중식", building: "현대벤처빌", address: "서울 강남구 밤고개로1길 10", floor: "상가", distance: 160, rating: 0, note: "중식 메뉴를 찾을 때 확인해 볼 곳.", tags: ["중식", "점심"] },
-  { id: "r8", name: "육대장 수서점", category: "한식", building: "로즈데일", address: "서울 강남구 광평로 280", floor: "지하 2층 124호", distance: 80, rating: 0, note: "육개장과 칼국수. 수서역과 연결되어 비 오는 날도 편해요.", tags: ["육개장", "해장"] },
-  { id: "r9", name: "판교집 수서직영점", category: "한식", building: "로즈데일", address: "서울 강남구 광평로 280", floor: "지하 2층 137호", distance: 80, rating: 0, note: "한돈 급랭삼겹살과 점심 식사 메뉴.", tags: ["삼겹살", "회식"] },
-  { id: "r10", name: "올라포케 수서점", category: "기타", building: "로즈데일", address: "서울 강남구 광평로 280", floor: "지하 2층 B125호", distance: 80, rating: 0, note: "가볍고 산뜻한 포케 메뉴.", tags: ["포케", "샐러드"] },
-  { id: "r11", name: "수서광안리", category: "한식", building: "로즈데일", address: "서울 강남구 광평로 280", floor: "상가", distance: 80, rating: 0, note: "수서역 인근 한식 식당.", tags: ["한식", "점심"] },
-  { id: "r12", name: "초원복집", category: "한식", building: "로즈데일", address: "서울 강남구 광평로 280", floor: "상가", distance: 80, rating: 0, note: "복 요리 전문점.", tags: ["복요리", "모임"] },
-  { id: "r13", name: "봉평메밀촌 수서점", category: "한식", building: "로즈데일", address: "서울 강남구 광평로 280", floor: "지하 2층 123호", distance: 80, rating: 0, note: "메밀 메뉴와 한식.", tags: ["메밀", "점심"] },
-  { id: "r14", name: "쇼부라멘 수서역점", category: "일식", building: "로즈데일", address: "서울 강남구 광평로 280", floor: "상가", distance: 80, rating: 0, note: "라멘을 찾을 때 들르기 좋은 곳.", tags: ["라멘", "혼밥"] },
-  { id: "r15", name: "동경규동 수서점", category: "일식", building: "500m 이내", address: "서울 강남구 광평로 295", floor: "상가", distance: 190, rating: 0, note: "규동과 돈까스 덮밥.", tags: ["규동", "혼밥"] },
-  { id: "r16", name: "가장맛있는족발 수서역점", category: "한식", building: "500m 이내", address: "서울 강남구 광평로 295", floor: "1층", distance: 190, rating: 0, note: "족발과 보쌈. 저녁 모임 후보.", tags: ["족발", "회식"] },
-  { id: "r17", name: "수서역 벌교한상", category: "한식", building: "500m 이내", address: "서울 강남구 광평로46길 7", floor: "상가", distance: 350, rating: 0, note: "벌교식 한상차림과 한식.", tags: ["한식", "모임"] },
-  { id: "a01", name: "온화담", category: "한식", building: "수서 인근", address: "서울 강남구 광평로46길 6", floor: "", distance: 407, rating: 0, note: "첨부 목록에서 추가한 수서 인근 한식당이에요.", tags: ["한식", "점심"] },
-  { id: "a02", name: "필경재", category: "한식", building: "수서 인근", address: "서울 강남구 광평로 205", floor: "", distance: 746, rating: 0, note: "한정식과 모임 장소를 찾을 때 확인해 볼 곳이에요.", tags: ["한정식", "모임"] },
-  { id: "a03", name: "전주집", category: "한식", building: "로즈데일", address: "서울 강남구 수서동 724", floor: "", distance: 89, rating: 0, note: "로즈데일 인근의 한식 식당이에요.", tags: ["한식", "점심"] },
-  { id: "a04", name: "청국장과보리밥 수서점", category: "한식", building: "수서 인근", address: "서울 강남구 수서동 450-4", floor: "", distance: 363, rating: 0, note: "청국장과 보리밥 중심의 한식당이에요.", tags: ["청국장", "보리밥"] },
-  { id: "a05", name: "웰체인 (얼큰짬뽕)", category: "중식", building: "수서 인근", address: "서울 강남구 광평로51길 27", floor: "", distance: 86, rating: 0, note: "얼큰한 짬뽕을 찾을 때 좋은 중식 후보예요.", tags: ["짬뽕", "중식"] },
-  { id: "a06", name: "서래향 수서점", category: "중식", building: "수서 인근", address: "서울 강남구 수서동 714-5", floor: "", distance: 52, rating: 0, note: "수서역 가까운 중식당이에요.", tags: ["중식", "모임"] },
-  { id: "a07", name: "만달린", category: "중식", building: "현대벤처빌", address: "서울 강남구 수서동 713", floor: "지하 1층", distance: 78, rating: 0, note: "현대벤처빌 인근에서 중식을 찾을 때 확인해 보세요.", tags: ["중식", "점심"] },
-  { id: "a08", name: "모모텐동", category: "일식", building: "수서 인근", address: "서울 강남구 광평로47길 17", floor: "", distance: 280, rating: 0, note: "텐동과 튀김 덮밥을 즐길 수 있는 일식당이에요.", tags: ["텐동", "혼밥"] },
-  { id: "a09", name: "스시야 본점", category: "일식", building: "로즈데일", address: "서울 강남구 수서동 724", floor: "", distance: 101, rating: 0, note: "초밥과 일식 메뉴를 찾을 때 확인해 볼 곳이에요.", tags: ["스시", "일식"] },
-  { id: "a10", name: "RiaNe (와인다이닝)", category: "양식", building: "수서 인근", address: "서울 강남구 수서동 736 신동아상가", floor: "2층", distance: 280, rating: 0, note: "와인과 양식 메뉴를 함께 즐기는 다이닝이에요.", tags: ["와인", "양식"] },
-  { id: "a11", name: "플레이팅 수서역사점", category: "기타", building: "SRT 수서역", address: "서울 강남구 밤고개로 99", floor: "지하 1층", distance: 257, rating: 0, note: "SRT 수서역 안에서 빠르게 식사할 때 편리해요.", tags: ["역사", "간편식"] },
-  { id: "a12", name: "밀탑 수서역점", category: "기타", building: "로즈데일", address: "서울 강남구 광평로 280", floor: "", distance: 89, rating: 0, note: "식사 후 디저트와 빙수를 찾을 때 좋은 후보예요.", tags: ["빙수", "디저트"] },
-  { id: "a13", name: "커피빈 수서점", category: "기타", building: "수서 인근", address: "서울 강남구 광평로51길 6-23", floor: "", distance: 161, rating: 0, note: "커피와 간단한 휴식을 위한 카페예요.", tags: ["카페", "커피"] },
-  { id: "a14", name: "달빛서원", category: "기타", building: "수서 인근", address: "서울 강남구 광평로47길 17", floor: "상가 1층", distance: 284, rating: 0, note: "수서 인근의 카페·디저트 후보예요.", tags: ["카페", "디저트"] },
-  { id: "a15", name: "노타임포유", category: "기타", building: "수서 인근", address: "서울 강남구 광평로46길 22", floor: "", distance: 420, rating: 0, note: "커피와 잠깐의 휴식을 위한 카페예요.", tags: ["카페", "커피"] },
-  { id: "a16", name: "아이 러브 커피", category: "기타", building: "500m 이내", address: "서울 강남구 광평로 295", floor: "서관동 107호", distance: 192, rating: 0, note: "사무실 가까이에서 커피를 마시기 좋은 카페예요.", tags: ["카페", "커피"] },
-  { id: "a17", name: "김밥천국 수서역점", category: "기타", building: "현대벤처빌", address: "서울 강남구 밤고개로1길 10", floor: "", distance: 51, rating: 0, note: "김밥과 분식, 간단한 식사를 빠르게 해결하기 좋아요.", tags: ["김밥", "분식"] },
-  { id: "a18", name: "가을한상 (수서역 SRT)", category: "한식", building: "SRT 수서역", address: "서울 강남구 수서동 214-2", floor: "", distance: 269, rating: 0, note: "수서역에서 한식 한 끼를 찾을 때 좋은 후보예요.", tags: ["한식", "역사"] },
-  { id: "a19", name: "효미역", category: "한식", building: "수서 인근", address: "서울 강남구 광평로 240", floor: "", distance: 404, rating: 0, note: "수서 인근 한식 식당으로 첨부 목록에서 추가했어요.", tags: ["한식", "점심"] },
-  { id: "a20", name: "와세다식당", category: "일식", building: "로즈데일", address: "서울 강남구 광평로 280", floor: "지하 2층", distance: 89, rating: 0, note: "로즈데일 지하 식당가의 일식당이에요.", tags: ["일식", "점심"] },
-  { id: "a21", name: "반가안동국시", category: "한식", building: "수서 인근", address: "서울 강남구 수서동 450-3", floor: "", distance: 377, rating: 0, note: "안동국시와 따뜻한 한식 메뉴를 찾을 때 좋아요.", tags: ["국시", "한식"] },
-  { id: "a22", name: "논골집 (수서점, 궁마을)", category: "한식", building: "수서 인근", address: "서울 강남구 수서동 450-1", floor: "", distance: 367, rating: 0, note: "궁마을 방향의 한식·고기 식당 후보예요.", tags: ["고기", "회식"] },
-  { id: "a23", name: "완백부대찌개 고사리꽃삼겹 수서역점", category: "한식", building: "로즈데일", address: "서울 강남구 광평로 280", floor: "116호", distance: 86, rating: 0, note: "부대찌개와 삼겹살 메뉴를 함께 고를 수 있어요.", tags: ["부대찌개", "삼겹살"] },
-  { id: "a24", name: "Hanam Pig House 수서역점", category: "한식", building: "수서 인근", address: "서울 강남구 수서동 714-6", floor: "", distance: 36, rating: 0, note: "돼지고기 구이와 회식 메뉴를 찾을 때 확인해 보세요.", tags: ["돼지고기", "회식"] },
-  { id: "a25", name: "제주몽트락 수서직영점", category: "한식", building: "수서 인근", address: "서울 강남구 수서동 717-6", floor: "", distance: 104, rating: 0, note: "제주식 돼지고기 메뉴를 찾을 때 좋은 후보예요.", tags: ["제주고기", "회식"] },
-  { id: "a26", name: "단미그린비", category: "한식", building: "수서 인근", address: "서울 강남구 수서동 인근", floor: "", distance: 971, rating: 0, note: "첨부 목록에 포함된 수서권 한식당이에요.", tags: ["한식", "모임"] },
-  { id: "a27", name: "더치앤빈 수서현대벤처빌점", category: "기타", building: "현대벤처빌", address: "서울 강남구 밤고개로1길 10", floor: "", distance: 52, rating: 0, note: "현대벤처빌 안에서 커피를 마시기 편한 카페예요.", tags: ["카페", "커피"] },
-  { id: "a28", name: "본죽&비빔밥 수서점", category: "한식", building: "현대벤처빌", address: "서울 강남구 밤고개로1길 10", floor: "", distance: 52, rating: 0, note: "죽과 비빔밥으로 가볍게 한 끼 하기 좋아요.", tags: ["죽", "비빔밥"] },
-  { id: "a29", name: "샐러디 수서점", category: "양식", building: "현대벤처빌", address: "서울 강남구 밤고개로1길 10", floor: "", distance: 52, rating: 0, note: "샐러드와 웜볼 등 가벼운 점심을 고를 수 있어요.", tags: ["샐러드", "건강식"] },
-  { id: "a30", name: "홍콩반점0410 수서점", category: "중식", building: "로즈데일", address: "서울 강남구 광평로 280", floor: "", distance: 86, rating: 0, note: "짜장면과 짬뽕 등 익숙한 중식 메뉴를 제공해요.", tags: ["짜장면", "짬뽕"] },
-  { id: "a31", name: "역전우동0410 수서점", category: "일식", building: "로즈데일", address: "서울 강남구 광평로 280", floor: "", distance: 86, rating: 0, note: "우동과 덮밥으로 빠르게 식사하기 좋아요.", tags: ["우동", "혼밥"] },
-  { id: "a32", name: "왕건카레 수서역점", category: "기타", building: "로즈데일", address: "서울 강남구 광평로 280", floor: "지하 2층 104호", distance: 86, rating: 0, note: "카레 메뉴를 찾을 때 확인해 볼 곳이에요.", tags: ["카레", "혼밥"] },
-  { id: "a33", name: "사위식당 수서점", category: "한식", building: "로즈데일", address: "서울 강남구 광평로 280", floor: "", distance: 86, rating: 0, note: "낙곱새 등 매콤한 한식 메뉴로 알려진 곳이에요.", tags: ["낙곱새", "한식"] },
-  { id: "a34", name: "구찌라쿠", category: "일식", building: "로즈데일", address: "서울 강남구 광평로 280", floor: "지하 2층", distance: 91, rating: 0, note: "로즈데일 지하의 일식 식당이에요.", tags: ["일식", "점심"] },
-  { id: "a35", name: "우공묵티기 수서점", category: "한식", building: "로즈데일", address: "서울 강남구 광평로 280", floor: "", distance: 86, rating: 0, note: "육회비빔밥과 국밥, 소고기 메뉴를 찾을 때 좋아요.", tags: ["육회비빔밥", "국밥"] },
-  { id: "a36", name: "일미원", category: "한식", building: "수서 인근", address: "서울 강남구 수서동 449-15", floor: "", distance: 348, rating: 0, note: "수서 궁마을 방향의 한식 식당이에요.", tags: ["한식", "모임"] },
-  { id: "a37", name: "산동네갯마을 수서본점", category: "한식", building: "수서 인근", address: "서울 강남구 수서동 464-5", floor: "", distance: 559, rating: 0, note: "해산물 중심의 한식 메뉴를 찾을 때 확인해 보세요.", tags: ["해산물", "모임"] },
-  { id: "a38", name: "빠레뜨한남 수서역점", category: "양식", building: "로즈데일", address: "서울 강남구 광평로 280", floor: "1층 118호", distance: 89, rating: 0, note: "파스타와 오므라이스 등 양식 메뉴를 제공해요.", tags: ["파스타", "오므라이스"] },
-  { id: "a39", name: "밀절 수서점", category: "한식", building: "로즈데일", address: "서울 강남구 광평로 280", floor: "지하 2층 126호", distance: 89, rating: 0, note: "로즈데일 지하에서 한식을 찾을 때 확인해 보세요.", tags: ["한식", "점심"] },
-];
-
-const seedPosts: Post[] = [
-  { id: "p1", title: "점심 번개 같이 가실 분?", content: "오늘 11시 40분에 로즈데일 쪽으로 가려고 합니다. 메뉴 추천도 받아요!", author: "수서미식가", password_hash: ADMIN_PASSWORD_HASH, created_at: "2026-07-24T02:20:00.000Z", views: 12 },
-  { id: "p2", title: "새로 생긴 식당 발견하면 여기 남겨주세요", content: "상호와 대략적인 위치만 적어주셔도 목록에 반영하기 쉬워요.", author: "관리자", password_hash: ADMIN_PASSWORD_HASH, created_at: "2026-07-23T07:10:00.000Z", views: 28 },
-];
-
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const isConnected = Boolean(supabaseUrl && supabaseKey);
@@ -183,10 +121,11 @@ function formatDate(value: string) {
 
 export default function Home() {
   const [tab, setTab] = useState<"restaurants" | "board">("restaurants");
-  const [restaurants, setRestaurants] = useState<Restaurant[]>(seedRestaurants);
-  const [posts, setPosts] = useState<Post[]>(seedPosts);
+  const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
+  const [posts, setPosts] = useState<Post[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [ratingSummaries, setRatingSummaries] = useState<RatingSummary[]>([]);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(isConnected ? "loading" : "offline");
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("전체");
   const [sort, setSort] = useState("distance");
@@ -203,20 +142,35 @@ export default function Home() {
   const [notice, setNotice] = useState("");
   const restaurantResultsRef = useRef<HTMLElement>(null);
 
-  useEffect(() => {
-    setIsAdmin(sessionStorage.getItem("suseo-admin") === "1");
-    if (!isConnected) return;
-    Promise.all([
+  async function loadData() {
+    if (!isConnected) {
+      setConnectionStatus("offline");
+      setNotice("Supabase 연결 정보가 없어 데이터를 불러올 수 없어요.");
+      return;
+    }
+
+    setConnectionStatus("loading");
+    const results = await Promise.allSettled([
       supabaseRequest("restaurants?select=*&order=distance.asc"),
       supabaseRequest("posts?select=id,title,content,author,created_at,views&order=created_at.desc"),
       supabaseRequest("reviews?select=id,restaurant_id,author,content,created_at&order=created_at.desc"),
       supabaseRequest("rpc/get_rating_summaries", { method: "POST", body: "{}" }),
-    ]).then(([restaurantRows, postRows, reviewRows, ratingRows]) => {
-      if (restaurantRows?.length) setRestaurants(restaurantRows);
-      if (postRows?.length) setPosts(postRows);
-      if (reviewRows?.length) setReviews(reviewRows);
-      if (ratingRows?.length) setRatingSummaries(ratingRows);
-    }).catch(() => setNotice("데이터 연결을 확인하지 못해 이 기기의 데모 목록을 보여드려요."));
+    ]);
+    const [restaurantResult, postResult, reviewResult, ratingResult] = results;
+
+    if (restaurantResult.status === "fulfilled") setRestaurants(Array.isArray(restaurantResult.value) ? restaurantResult.value : []);
+    if (postResult.status === "fulfilled") setPosts(Array.isArray(postResult.value) ? postResult.value : []);
+    if (reviewResult.status === "fulfilled") setReviews(Array.isArray(reviewResult.value) ? reviewResult.value : []);
+    if (ratingResult.status === "fulfilled") setRatingSummaries(Array.isArray(ratingResult.value) ? ratingResult.value : []);
+
+    const hasFailure = results.some((result) => result.status === "rejected");
+    setConnectionStatus(hasFailure ? "partial" : "connected");
+    if (hasFailure) setNotice("일부 데이터를 불러오지 못했어요. 연결 재시도를 눌러 주세요.");
+  }
+
+  useEffect(() => {
+    setIsAdmin(sessionStorage.getItem("suseo-admin") === "1");
+    void loadData();
   }, []);
 
   useEffect(() => {
@@ -500,8 +454,9 @@ export default function Home() {
   };
 
   const pickRandomRestaurant = () => {
-    if (!filtered.length) return setNotice("현재 조건에서 추천할 식당이 없어요.");
-    const picked = filtered[Math.floor(Math.random() * filtered.length)];
+    const candidates = filtered.filter((item) => ![item.name, ...item.tags].some((value) => /(카페|커피|coffee|cafe)/i.test(value)));
+    if (!candidates.length) return setNotice("현재 조건에서 추천할 식당이 없어요.");
+    const picked = candidates[Math.floor(Math.random() * candidates.length)];
     openRestaurant(picked);
     setNotice(`오늘의 추천은 ${picked.name}!`);
   };
@@ -518,7 +473,14 @@ export default function Home() {
           <button className={tab === "board" ? "active" : ""} onClick={() => setTab("board")}>자유게시판 <span className="navCount">{posts.length}</span></button>
         </nav>
         <div className="headerActions">
-          <div className="connection"><span className={isConnected ? "dot live" : "dot"} />{isConnected ? "공용 데이터 연결됨" : "데모 모드"}</div>
+          <div className={`connection ${connectionStatus}`}>
+            <span className={connectionStatus === "connected" ? "dot live" : "dot"} />
+            {connectionStatus === "loading" && "데이터 연결 확인 중"}
+            {connectionStatus === "connected" && "공용 데이터 연결됨"}
+            {connectionStatus === "partial" && "일부 데이터 연결 실패"}
+            {connectionStatus === "offline" && "데이터 연결 안 됨"}
+            {(connectionStatus === "partial" || connectionStatus === "offline") && <button type="button" onClick={() => void loadData()}>연결 재시도</button>}
+          </div>
           <button className={isAdmin ? "adminButton active" : "adminButton"} onClick={() => isAdmin ? logoutAdmin() : setShowAdminLogin(true)}>
             {isAdmin ? "관리자 · 로그아웃" : "관리자 로그인"}
           </button>

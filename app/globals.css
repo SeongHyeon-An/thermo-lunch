@@ -28,6 +28,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .tabs button.active::after { content: ""; height: 3px; border-radius: 3px; background: var(--lime); position: absolute; left: 0; right: 0; bottom: 0; }
 .navCount { font-size: 10px; background: var(--orange); border-radius: 99px; padding: 2px 6px; color: white; margin-left: 3px; }
 .connection { font-size: 12px; display: flex; align-items: center; gap: 7px; color: rgba(255,255,255,.72); }
+.connection.partial, .connection.offline { color: #ffd6c8; }
+.connection button { border: 1px solid rgba(255,255,255,.3); background: transparent; color: white; border-radius: 6px; padding: 4px 7px; font-size: 9px; font-weight: 800; cursor: pointer; }
 .headerActions { display: flex; align-items: center; gap: 14px; }
 .adminButton { border: 1px solid rgba(255,255,255,.24); background: rgba(255,255,255,.06); color: white; padding: 8px 11px; border-radius: 8px; font-size: 10px; font-weight: 800; }
 .adminButton.active { background: var(--lime); color: var(--green); border-color: var(--lime); }
