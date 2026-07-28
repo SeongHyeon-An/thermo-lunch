@@ -137,6 +137,7 @@ export default function Home() {
   const [editingReview, setEditingReview] = useState<Review | null>(null);
   const [reviewFormOpen, setReviewFormOpen] = useState(false);
   const [ratingFormOpen, setRatingFormOpen] = useState(false);
+  const [ratingDraft, setRatingDraft] = useState(0);
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [notice, setNotice] = useState("");
@@ -312,7 +313,11 @@ export default function Home() {
     const form = new FormData(event.currentTarget);
     const author = String(form.get("author") || "").trim();
     const password = String(form.get("password") || "");
-    const rating = Number(form.get("rating") || 0);
+    const rating = ratingDraft;
+    if (!rating) {
+      setNotice("별점을 선택해 주세요.");
+      return;
+    }
     const voterHash = await hashText(`${author.toLocaleLowerCase("ko-KR")}:${password}`);
 
     try {
@@ -333,6 +338,7 @@ export default function Home() {
         return;
       }
       setRatingFormOpen(false);
+      setRatingDraft(0);
       event.currentTarget.reset();
       setNotice("별점을 반영했어요. 같은 이름과 비밀번호로 다시 주면 기존 별점이 변경돼요.");
     } catch {
@@ -451,6 +457,7 @@ export default function Home() {
     setEditingReview(null);
     setReviewFormOpen(false);
     setRatingFormOpen(false);
+    setRatingDraft(0);
   };
 
   const pickRandomRestaurant = () => {
@@ -628,7 +635,10 @@ export default function Home() {
                 <span>사용자 평균</span>
                 <b>★ {ratingStats[selected.id] ? ratingStats[selected.id].average.toFixed(1) : "평가 전"}</b>
                 <small>{ratingStats[selected.id]?.count || 0}개의 평가</small>
-                <button className="ratingToggleButton" onClick={() => setRatingFormOpen((open) => !open)}>{ratingFormOpen ? "별점 입력 접기" : "별점 주기"}</button>
+                <button className="ratingToggleButton" onClick={() => {
+                  setRatingDraft(0);
+                  setRatingFormOpen((open) => !open);
+                }}>{ratingFormOpen ? "별점 입력 접기" : "별점 주기"}</button>
               </div>
               {ratingFormOpen && <form className="ratingForm" onSubmit={saveRating}>
                 <p>별점은 한 사람당 식당별 1개만 반영돼요. 같은 이름과 비밀번호로 다시 제출하면 기존 별점이 변경됩니다.</p>
@@ -638,9 +648,21 @@ export default function Home() {
                 </div>
                 <fieldset className="ratingField">
                   <legend>별점</legend>
-                  <div>{[5, 4, 3, 2, 1].map((value) => <label key={value}><input type="radio" name="rating" value={value} required /><span>★</span></label>)}</div>
+                  <div className="ratingButtons">
+                    {[1, 2, 3, 4, 5].map((value) => (
+                      <button
+                        key={value}
+                        type="button"
+                        className={value <= ratingDraft ? "active" : ""}
+                        aria-pressed={ratingDraft === value}
+                        aria-label={`${value}점${ratingDraft === value ? ", 선택됨" : ""}`}
+                        onClick={() => setRatingDraft((current) => current === value ? 0 : value)}
+                      >★</button>
+                    ))}
+                    <strong aria-live="polite">{ratingDraft ? `${ratingDraft}점 선택됨` : "선택 안 됨"}</strong>
+                  </div>
                 </fieldset>
-                <div className="reviewFormActions"><button className="primaryButton" type="submit">별점 저장</button></div>
+                <div className="reviewFormActions"><button className="primaryButton" type="submit" disabled={!ratingDraft}>별점 저장</button></div>
               </form>}
 
               {isAdmin && <div className="adminDrawerActions"><button className="secondaryButton danger" onClick={() => removeRestaurant(selected)}>식당 삭제</button><button className="primaryButton" onClick={() => openEdit(selected)}>식당 정보 수정</button></div>}
