@@ -94,6 +94,16 @@ async function hashText(value: string) {
   return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+async function getAnonymousVoterHash() {
+  const storageKey = "suseo-rating-voter";
+  let voterId = localStorage.getItem(storageKey);
+  if (!voterId) {
+    voterId = crypto.randomUUID();
+    localStorage.setItem(storageKey, voterId);
+  }
+  return hashText(voterId);
+}
+
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const isConnected = Boolean(supabaseUrl && supabaseKey);
@@ -136,8 +146,8 @@ export default function Home() {
   const [editingPost, setEditingPost] = useState<Post | null>(null);
   const [editingReview, setEditingReview] = useState<Review | null>(null);
   const [reviewFormOpen, setReviewFormOpen] = useState(false);
-  const [ratingFormOpen, setRatingFormOpen] = useState(false);
   const [ratingDraft, setRatingDraft] = useState(0);
+  const [ratingSaving, setRatingSaving] = useState(false);
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [notice, setNotice] = useState("");
@@ -179,6 +189,26 @@ export default function Home() {
     const timer = setTimeout(() => setNotice(""), 3200);
     return () => clearTimeout(timer);
   }, [notice]);
+
+  useEffect(() => {
+    let active = true;
+    setRatingDraft(0);
+    if (!selected || !isConnected) return () => { active = false; };
+
+    getAnonymousVoterHash()
+      .then((voterHash) => supabaseRequest("rpc/get_my_rating", {
+        method: "POST",
+        body: JSON.stringify({ p_restaurant_id: selected.id, p_voter_hash: voterHash }),
+      }))
+      .then((rating) => {
+        if (active) setRatingDraft(Number(rating) || 0);
+      })
+      .catch(() => {
+        if (active) setNotice("내 별점 정보를 불러오지 못했어요.");
+      });
+
+    return () => { active = false; };
+  }, [selected]);
 
   const ratingStats = useMemo(() => {
     const stats: Record<string, { average: number; count: number }> = {};
@@ -307,42 +337,35 @@ export default function Home() {
     }
   }
 
-  async function saveRating(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function toggleRating(value: number) {
     if (!selected) return;
-    const form = new FormData(event.currentTarget);
-    const author = String(form.get("author") || "").trim();
-    const password = String(form.get("password") || "");
-    const rating = ratingDraft;
-    if (!rating) {
-      setNotice("별점을 선택해 주세요.");
-      return;
-    }
-    const voterHash = await hashText(`${author.toLocaleLowerCase("ko-KR")}:${password}`);
+    if (!isConnected || ratingSaving) return;
+    const previousRating = ratingDraft;
+    const nextRating = previousRating === value ? 0 : value;
+    setRatingDraft(nextRating);
+    setRatingSaving(true);
 
     try {
-      if (isConnected) {
-        const result = await supabaseRequest("rpc/save_rating", {
-          method: "POST",
-          body: JSON.stringify({ p_restaurant_id: selected.id, p_author: author, p_rating: rating, p_voter_hash: voterHash }),
+      const voterHash = await getAnonymousVoterHash();
+      const result = await supabaseRequest("rpc/save_rating", {
+        method: "POST",
+        body: JSON.stringify({ p_restaurant_id: selected.id, p_rating: nextRating, p_voter_hash: voterHash }),
+      });
+      const summary = result?.[0];
+      if (summary) {
+        setRatingSummaries((items) => {
+          const others = items.filter((item) => item.restaurant_id !== selected.id);
+          return Number(summary.count) > 0
+            ? [...others, { restaurant_id: selected.id, average: Number(summary.average), count: Number(summary.count) }]
+            : others;
         });
-        const summary = result?.[0];
-        if (summary) {
-          setRatingSummaries((items) => [
-            ...items.filter((item) => item.restaurant_id !== selected.id),
-            { restaurant_id: selected.id, average: Number(summary.average), count: Number(summary.count) },
-          ]);
-        }
-      } else {
-        setNotice("별점 저장은 공용 데이터가 연결된 사이트에서 사용할 수 있어요.");
-        return;
       }
-      setRatingFormOpen(false);
-      setRatingDraft(0);
-      event.currentTarget.reset();
-      setNotice("별점을 반영했어요. 같은 이름과 비밀번호로 다시 주면 기존 별점이 변경돼요.");
+      setNotice(nextRating ? `${nextRating}점으로 반영했어요.` : "내 별점을 취소했어요.");
     } catch {
+      setRatingDraft(previousRating);
       setNotice("별점을 저장하지 못했어요.");
+    } finally {
+      setRatingSaving(false);
     }
   }
 
@@ -456,7 +479,6 @@ export default function Home() {
     setSelected(item);
     setEditingReview(null);
     setReviewFormOpen(false);
-    setRatingFormOpen(false);
     setRatingDraft(0);
   };
 
@@ -635,19 +657,8 @@ export default function Home() {
                 <span>사용자 평균</span>
                 <b>★ {ratingStats[selected.id] ? ratingStats[selected.id].average.toFixed(1) : "평가 전"}</b>
                 <small>{ratingStats[selected.id]?.count || 0}개의 평가</small>
-                <button className="ratingToggleButton" onClick={() => {
-                  setRatingDraft(0);
-                  setRatingFormOpen((open) => !open);
-                }}>{ratingFormOpen ? "별점 입력 접기" : "별점 주기"}</button>
-              </div>
-              {ratingFormOpen && <form className="ratingForm" onSubmit={saveRating}>
-                <p>별점은 한 사람당 식당별 1개만 반영돼요. 같은 이름과 비밀번호로 다시 제출하면 기존 별점이 변경됩니다.</p>
-                <div className="reviewFormRow">
-                  <label>이름<input name="author" required placeholder="이름 또는 별명" /></label>
-                  <label>비밀번호<input name="password" type="password" required minLength={4} placeholder="내 별점 확인용" /></label>
-                </div>
-                <fieldset className="ratingField">
-                  <legend>별점</legend>
+                <div className="inlineRatingControl">
+                  <span>내 별점</span>
                   <div className="ratingButtons">
                     {[1, 2, 3, 4, 5].map((value) => (
                       <button
@@ -656,14 +667,14 @@ export default function Home() {
                         className={value <= ratingDraft ? "active" : ""}
                         aria-pressed={ratingDraft === value}
                         aria-label={`${value}점${ratingDraft === value ? ", 선택됨" : ""}`}
-                        onClick={() => setRatingDraft((current) => current === value ? 0 : value)}
+                        disabled={ratingSaving}
+                        onClick={() => void toggleRating(value)}
                       >★</button>
                     ))}
-                    <strong aria-live="polite">{ratingDraft ? `${ratingDraft}점 선택됨` : "선택 안 됨"}</strong>
                   </div>
-                </fieldset>
-                <div className="reviewFormActions"><button className="primaryButton" type="submit" disabled={!ratingDraft}>별점 저장</button></div>
-              </form>}
+                  <strong aria-live="polite">{ratingSaving ? "저장 중…" : ratingDraft ? `${ratingDraft}점 선택됨` : "선택 안 됨"}</strong>
+                </div>
+              </div>
 
               {isAdmin && <div className="adminDrawerActions"><button className="secondaryButton danger" onClick={() => removeRestaurant(selected)}>식당 삭제</button><button className="primaryButton" onClick={() => openEdit(selected)}>식당 정보 수정</button></div>}
 
