@@ -201,10 +201,12 @@ footer small { grid-column: 2; color: rgba(255,255,255,.35); font-size: 10px; }
 .inlineRatingControl { grid-column: 1 / -1; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 9px; margin-top: 10px; padding-top: 13px; border-top: 1px solid var(--line); }
 .inlineRatingControl > span { color: var(--green); font-size: 10px; font-weight: 800; }
 .inlineRatingControl .ratingButtons { display: flex; align-items: center; gap: 2px; }
-.ratingButtons button { border: 0; background: transparent; color: #ced1ca; font-size: 30px; line-height: 1; padding: 3px; cursor: pointer; transition: color .15s, transform .15s; }
+.ratingButtons button { border: 1px solid var(--line); border-radius: 7px; background: white; color: var(--muted); font-size: 13px; font-weight: 700; min-width: 36px; min-height: 36px; padding: 7px; cursor: pointer; transition: color .15s, background .15s; }
+.ratingButtons { flex-wrap: wrap; gap: 5px; }
+.ratingButtons button.active { background: var(--green); border-color: var(--green); color: white; }
+.cardReviewCount { display: inline-block; font-size: 11px; color: var(--muted); margin-top: 9px; }
 .ratingButtons button:hover, .ratingButtons button:focus-visible { transform: scale(1.12); outline: none; }
 .ratingButtons button:focus-visible { border-radius: 5px; box-shadow: 0 0 0 2px var(--green); }
-.ratingButtons button.active { color: var(--orange); }
 .ratingButtons button:disabled { cursor: wait; opacity: .6; }
 .inlineRatingControl > strong { color: var(--green); font-size: 10px; text-align: right; }
 .rateBox { display: flex; align-items: center; justify-content: space-between; padding: 18px 0; }

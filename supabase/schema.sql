@@ -36,7 +36,7 @@ create table if not exists public.ratings (
   id text primary key,
   restaurant_id text not null references public.restaurants(id) on delete cascade,
   author text not null,
-  rating integer not null check (rating between 1 and 5),
+  rating numeric(2,1) not null check (rating between 0.5 and 5 and mod(rating, 0.5) = 0),
   voter_hash text not null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -133,7 +133,7 @@ $$;
 
 create or replace function public.save_rating(
   p_restaurant_id text,
-  p_rating integer,
+  p_rating numeric,
   p_voter_hash text
 ) returns table (average numeric, count bigint)
 language plpgsql
@@ -141,7 +141,8 @@ security definer
 set search_path = public
 as $$
 begin
-  if p_rating not between 0 and 5 or length(p_voter_hash) <> 64 then
+  if p_rating is null or p_rating not between 0 and 5 or mod(p_rating, 0.5) <> 0
+     or p_voter_hash is null or p_voter_hash !~ '^[0-9a-f]{64}$' then
     raise exception 'invalid rating';
   end if;
 
@@ -165,7 +166,7 @@ $$;
 create or replace function public.get_my_rating(
   p_restaurant_id text,
   p_voter_hash text
-) returns integer
+) returns numeric
 language sql
 stable
 security definer
@@ -232,7 +233,7 @@ revoke all on table public.ratings from anon, authenticated;
 grant execute on function public.update_review(text, text, text, text) to anon, authenticated;
 grant execute on function public.delete_review(text, text) to anon, authenticated;
 grant execute on function public.get_rating_summaries() to anon, authenticated;
-grant execute on function public.save_rating(text, integer, text) to anon, authenticated;
+grant execute on function public.save_rating(text, numeric, text) to anon, authenticated;
 grant execute on function public.get_my_rating(text, text) to anon, authenticated;
 grant execute on function public.update_post(text, text, text, text, text) to anon, authenticated;
 grant execute on function public.delete_post(text, text) to anon, authenticated;

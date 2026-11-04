@@ -218,6 +218,12 @@ export default function Home() {
     return stats;
   }, [ratingSummaries]);
 
+  const reviewCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const review of reviews) counts[review.restaurant_id] = (counts[review.restaurant_id] || 0) + 1;
+    return counts;
+  }, [reviews]);
+
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return restaurants
@@ -594,6 +600,7 @@ export default function Home() {
                         <span className="distance">도보 {Math.max(1, Math.round(item.distance / 75))}분</span>
                         <span className={stat ? "rating" : "rating empty"}>★ {stat ? `${stat.average.toFixed(1)} (${stat.count})` : "평가 전"}</span>
                       </div>
+                      <span className="cardReviewCount">리뷰 {reviewCounts[item.id] || 0}</span>
                       <h3>{item.name}</h3>
                       <p>{item.note}</p>
                       <div className="cardFooter">
@@ -658,18 +665,18 @@ export default function Home() {
                 <b>★ {ratingStats[selected.id] ? ratingStats[selected.id].average.toFixed(1) : "평가 전"}</b>
                 <small>{ratingStats[selected.id]?.count || 0}개의 평가</small>
                 <div className="inlineRatingControl">
-                  <span>내 별점</span>
-                  <div className="ratingButtons">
-                    {[1, 2, 3, 4, 5].map((value) => (
+                  <span>내 별점<br />5점 만점</span>
+                  <div className="ratingButtons" role="group" aria-label="내 별점 선택, 0.5점 단위">
+                    {[0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5].map((value) => (
                       <button
                         key={value}
                         type="button"
-                        className={value <= ratingDraft ? "active" : ""}
+                        className={ratingDraft === value ? "active" : ""}
                         aria-pressed={ratingDraft === value}
                         aria-label={`${value}점${ratingDraft === value ? ", 선택됨" : ""}`}
                         disabled={ratingSaving}
                         onClick={() => void toggleRating(value)}
-                      >★</button>
+                      >{value.toFixed(1)}</button>
                     ))}
                   </div>
                   <strong aria-live="polite">{ratingSaving ? "저장 중…" : ratingDraft ? `${ratingDraft}점 선택됨` : "선택 안 됨"}</strong>
