@@ -202,9 +202,9 @@ footer small { grid-column: 2; color: rgba(255,255,255,.35); font-size: 10px; }
 .inlineRatingControl > span { color: var(--green); font-size: 10px; font-weight: 800; }
 .inlineRatingControl .ratingButtons { display: flex; align-items: center; gap: 2px; width: max-content; }
 .ratingStar { position: relative; display: block; width: 36px; height: 40px; flex: none; }
-.ratingStarArt { display: block; position: absolute; inset: 0; pointer-events: none; color: #d8dcd6; }
+.ratingStar .ratingStarArt { display: block; position: absolute; inset: 0; pointer-events: none; color: #d8dcd6; }
 .ratingStarArt svg { display: block; width: 36px; height: 40px; fill: currentColor; }
-.ratingStarFill { position: absolute; left: 0; top: 0; height: 100%; overflow: hidden; color: var(--orange); }
+.ratingStar .ratingStarFill { position: absolute; left: 0; top: 0; height: 100%; overflow: hidden; color: var(--orange); }
 .ratingButtons .ratingHit { position: absolute; z-index: 1; top: 0; width: 50%; height: 100%; padding: 0; border: 0; background: transparent; cursor: pointer; border-radius: 3px; }
 .ratingHit.firstHalf { left: 0; }
 .ratingHit.secondHalf { right: 0; }
