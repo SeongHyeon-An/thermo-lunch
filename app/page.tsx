@@ -147,6 +147,7 @@ export default function Home() {
   const [editingReview, setEditingReview] = useState<Review | null>(null);
   const [reviewFormOpen, setReviewFormOpen] = useState(false);
   const [ratingDraft, setRatingDraft] = useState(0);
+  const [ratingPreview, setRatingPreview] = useState<number | null>(null);
   const [ratingSaving, setRatingSaving] = useState(false);
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -193,6 +194,7 @@ export default function Home() {
   useEffect(() => {
     let active = true;
     setRatingDraft(0);
+    setRatingPreview(null);
     if (!selected || !isConnected) return () => { active = false; };
 
     getAnonymousVoterHash()
@@ -348,6 +350,7 @@ export default function Home() {
     if (!isConnected || ratingSaving) return;
     const previousRating = ratingDraft;
     const nextRating = previousRating === value ? 0 : value;
+    setRatingPreview(null);
     setRatingDraft(nextRating);
     setRatingSaving(true);
 
@@ -666,20 +669,41 @@ export default function Home() {
                 <small>{ratingStats[selected.id]?.count || 0}개의 평가</small>
                 <div className="inlineRatingControl">
                   <span>내 별점<br />5점 만점</span>
-                  <div className="ratingButtons" role="group" aria-label="내 별점 선택, 0.5점 단위">
-                    {[0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5].map((value) => (
-                      <button
-                        key={value}
-                        type="button"
-                        className={ratingDraft === value ? "active" : ""}
-                        aria-pressed={ratingDraft === value}
-                        aria-label={`${value}점${ratingDraft === value ? ", 선택됨" : ""}`}
-                        disabled={ratingSaving}
-                        onClick={() => void toggleRating(value)}
-                      >{value.toFixed(1)}</button>
+                  <div
+                    className="ratingButtons"
+                    role="group"
+                    aria-label="내 별점 선택, 0.5점 단위"
+                    onPointerLeave={() => setRatingPreview(null)}
+                    onBlur={(event) => {
+                      if (!event.currentTarget.contains(event.relatedTarget)) setRatingPreview(null);
+                    }}
+                  >
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <span className="ratingStar" key={star}>
+                        <span className="ratingStarArt" aria-hidden="true">
+                          <svg viewBox="0 0 24 24"><path d="m12 2 3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.77 5.82 21 7 14.14 2 9.27l6.91-1.01Z" /></svg>
+                          <span className="ratingStarFill" style={{ width: `${Math.min(1, Math.max(0, (ratingPreview ?? ratingDraft) - star + 1)) * 100}%` }}>
+                            <svg viewBox="0 0 24 24"><path d="m12 2 3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.77 5.82 21 7 14.14 2 9.27l6.91-1.01Z" /></svg>
+                          </span>
+                        </span>
+                        {[star - 0.5, star].map((value, half) => (
+                          <button
+                            key={value}
+                            type="button"
+                            className={`ratingHit ${half === 0 ? "firstHalf" : "secondHalf"}`}
+                            aria-pressed={ratingDraft === value}
+                            aria-label={`${value}점${ratingDraft === value ? ", 선택됨" : ""}`}
+                            disabled={ratingSaving}
+                            onPointerEnter={(event) => { if (event.pointerType !== "touch") setRatingPreview(value); }}
+                            onPointerMove={(event) => { if (event.pointerType !== "touch") setRatingPreview(value); }}
+                            onFocus={() => setRatingPreview(value)}
+                            onClick={() => void toggleRating(value)}
+                          />
+                        ))}
+                      </span>
                     ))}
                   </div>
-                  <strong aria-live="polite">{ratingSaving ? "저장 중…" : ratingDraft ? `${ratingDraft}점 선택됨` : "선택 안 됨"}</strong>
+                  <strong aria-live="polite">{ratingSaving ? "저장 중…" : ratingPreview !== null ? `${ratingPreview}점 미리보기` : ratingDraft ? `${ratingDraft}점 선택됨` : "선택 안 됨"}</strong>
                 </div>
               </div>
 
