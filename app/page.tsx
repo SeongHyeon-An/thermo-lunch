@@ -264,9 +264,23 @@ export default function Home() {
     setNotice("관리자 로그아웃을 완료했어요.");
   }
 
+  function requireConnection() {
+    if (isConnected) return true;
+    setConnectionStatus("offline");
+    setNotice("데이터베이스 연결이 필요해요. 입력 내용은 유지되며, 연결 설정 후 다시 시도해 주세요.");
+    return false;
+  }
+
+  function requireSavedRow(result: unknown, id: string) {
+    if (!Array.isArray(result) || !result.some((row) => row?.id === id)) {
+      throw new Error("The database did not confirm this change");
+    }
+  }
+
   async function saveRestaurant(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!isAdmin) return setShowAdminLogin(true);
+    if (!requireConnection()) return;
     const form = new FormData(event.currentTarget);
     const row: Restaurant = {
       id: editing?.id || crypto.randomUUID(),
@@ -281,12 +295,11 @@ export default function Home() {
       tags: String(form.get("tags") || "").split(",").map((tag) => tag.trim()).filter(Boolean),
     };
     try {
-      if (isConnected) {
-        await supabaseRequest(editing ? `restaurants?id=eq.${editing.id}` : "restaurants", {
-          method: editing ? "PATCH" : "POST",
-          body: JSON.stringify(row),
-        });
-      }
+      const saved = await supabaseRequest(editing ? `restaurants?id=eq.${editing.id}` : "restaurants", {
+        method: editing ? "PATCH" : "POST",
+        body: JSON.stringify(row),
+      });
+      requireSavedRow(saved, row.id);
       setRestaurants((items) => editing ? items.map((item) => item.id === row.id ? row : item) : [row, ...items]);
       setSelected(row);
       setNotice(editing ? "식당 정보가 수정됐어요." : "새 식당이 추가됐어요.");
@@ -299,9 +312,11 @@ export default function Home() {
 
   async function removeRestaurant(item: Restaurant) {
     if (!isAdmin) return setShowAdminLogin(true);
+    if (!requireConnection()) return;
     if (!window.confirm(`${item.name}을(를) 목록에서 삭제할까요?`)) return;
     try {
-      if (isConnected) await supabaseRequest(`restaurants?id=eq.${item.id}`, { method: "DELETE" });
+      const removed = await supabaseRequest(`restaurants?id=eq.${item.id}`, { method: "DELETE" });
+      requireSavedRow(removed, item.id);
       setRestaurants((items) => items.filter((restaurant) => restaurant.id !== item.id));
       setSelected(null);
       setNotice("식당을 삭제했어요.");
@@ -313,33 +328,32 @@ export default function Home() {
   async function saveReview(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selected) return;
-    const form = new FormData(event.currentTarget);
+    if (!requireConnection()) return;
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const author = String(form.get("author") || "").trim();
     const content = String(form.get("content") || "").trim();
     const passwordHash = await hashText(String(form.get("password") || ""));
 
     try {
       if (editingReview) {
-        if (isConnected) {
-          const updated = await supabaseRequest("rpc/update_review", {
-            method: "POST",
-            body: JSON.stringify({ p_id: editingReview.id, p_author: author, p_content: content, p_password_hash: passwordHash }),
-          });
-          if (!updated) return setNotice("비밀번호가 맞지 않아요.");
-        } else if (editingReview.password_hash !== passwordHash) {
-          return setNotice("비밀번호가 맞지 않아요.");
-        }
+        const updated = await supabaseRequest("rpc/update_review", {
+          method: "POST",
+          body: JSON.stringify({ p_id: editingReview.id, p_author: author, p_content: content, p_password_hash: passwordHash }),
+        });
+        if (updated !== true) return setNotice("수정하지 못했어요. 비밀번호 또는 리뷰 존재 여부를 확인해 주세요.");
         setReviews((items) => items.map((review) => review.id === editingReview.id ? { ...review, author, content } : review));
         setEditingReview(null);
         setNotice("리뷰를 수정했어요.");
       } else {
         const review: Review = { id: crypto.randomUUID(), restaurant_id: selected.id, author, content, password_hash: passwordHash, created_at: new Date().toISOString() };
-        if (isConnected) await supabaseRequest("reviews", { method: "POST", body: JSON.stringify(review) });
+        const saved = await supabaseRequest("reviews", { method: "POST", body: JSON.stringify(review) });
+        requireSavedRow(saved, review.id);
         setReviews((items) => [review, ...items]);
         setNotice("리뷰를 남겼어요.");
       }
       setReviewFormOpen(false);
-      event.currentTarget.reset();
+      formElement.reset();
     } catch {
       setNotice("리뷰를 저장하지 못했어요.");
     }
@@ -347,7 +361,7 @@ export default function Home() {
 
   async function toggleRating(value: number) {
     if (!selected) return;
-    if (!isConnected || ratingSaving) return;
+    if (!requireConnection() || ratingSaving) return;
     const previousRating = ratingDraft;
     const nextRating = previousRating === value ? 0 : value;
     setRatingPreview(null);
@@ -379,16 +393,13 @@ export default function Home() {
   }
 
   async function removeReview(review: Review) {
+    if (!requireConnection()) return;
     const password = window.prompt("리뷰 작성 시 입력한 비밀번호를 입력해 주세요.");
     if (!password) return;
     const passwordHash = await hashText(password);
     try {
-      if (isConnected) {
-        const removed = await supabaseRequest("rpc/delete_review", { method: "POST", body: JSON.stringify({ p_id: review.id, p_password_hash: passwordHash }) });
-        if (!removed) return setNotice("비밀번호가 맞지 않아요.");
-      } else if (review.password_hash !== passwordHash) {
-        return setNotice("비밀번호가 맞지 않아요.");
-      }
+      const removed = await supabaseRequest("rpc/delete_review", { method: "POST", body: JSON.stringify({ p_id: review.id, p_password_hash: passwordHash }) });
+      if (removed !== true) return setNotice("삭제하지 못했어요. 비밀번호 또는 리뷰 존재 여부를 확인해 주세요.");
       setReviews((items) => items.filter((item) => item.id !== review.id));
       if (editingReview?.id === review.id) setEditingReview(null);
       setNotice("리뷰를 삭제했어요.");
@@ -399,6 +410,7 @@ export default function Home() {
 
   async function savePost(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!requireConnection()) return;
     const form = new FormData(event.currentTarget);
     const title = String(form.get("title") || "").trim();
     const content = String(form.get("content") || "").trim();
@@ -406,15 +418,11 @@ export default function Home() {
     const passwordHash = await hashText(String(form.get("password") || ""));
     try {
       if (editingPost) {
-        if (isConnected) {
-          const updated = await supabaseRequest("rpc/update_post", {
-            method: "POST",
-            body: JSON.stringify({ p_id: editingPost.id, p_author: author, p_title: title, p_content: content, p_password_hash: passwordHash }),
-          });
-          if (!updated) return setNotice("비밀번호가 맞지 않아요.");
-        } else if (editingPost.password_hash !== passwordHash) {
-          return setNotice("비밀번호가 맞지 않아요.");
-        }
+        const updated = await supabaseRequest("rpc/update_post", {
+          method: "POST",
+          body: JSON.stringify({ p_id: editingPost.id, p_author: author, p_title: title, p_content: content, p_password_hash: passwordHash }),
+        });
+        if (updated !== true) return setNotice("수정하지 못했어요. 비밀번호 또는 게시글 존재 여부를 확인해 주세요.");
         setPosts((items) => items.map((post) => post.id === editingPost.id ? { ...post, title, content, author } : post));
         setNotice("게시글을 수정했어요.");
       } else {
@@ -427,7 +435,8 @@ export default function Home() {
           created_at: new Date().toISOString(),
           views: 0,
         };
-        if (isConnected) await supabaseRequest("posts", { method: "POST", body: JSON.stringify(post) });
+        const saved = await supabaseRequest("posts", { method: "POST", body: JSON.stringify(post) });
+        requireSavedRow(saved, post.id);
         setPosts((items) => [post, ...items]);
         setNotice("게시글을 등록했어요.");
       }
@@ -439,23 +448,21 @@ export default function Home() {
   }
 
   async function removePost(post: Post) {
+    if (!requireConnection()) return;
     if (!window.confirm("이 게시글을 삭제할까요?")) return;
     try {
       if (isAdmin) {
-        if (isConnected) await supabaseRequest(`posts?id=eq.${post.id}`, { method: "DELETE" });
+        const removed = await supabaseRequest(`posts?id=eq.${post.id}`, { method: "DELETE" });
+        requireSavedRow(removed, post.id);
       } else {
         const password = window.prompt("글 작성 시 입력한 비밀번호를 입력해 주세요.");
         if (!password) return;
         const passwordHash = await hashText(password);
-        if (isConnected) {
-          const removed = await supabaseRequest("rpc/delete_post", {
-            method: "POST",
-            body: JSON.stringify({ p_id: post.id, p_password_hash: passwordHash }),
-          });
-          if (!removed) return setNotice("비밀번호가 맞지 않아요.");
-        } else if (post.password_hash !== passwordHash) {
-          return setNotice("비밀번호가 맞지 않아요.");
-        }
+        const removed = await supabaseRequest("rpc/delete_post", {
+          method: "POST",
+          body: JSON.stringify({ p_id: post.id, p_password_hash: passwordHash }),
+        });
+        if (removed !== true) return setNotice("삭제하지 못했어요. 비밀번호 또는 게시글 존재 여부를 확인해 주세요.");
       }
       setPosts((items) => items.filter((item) => item.id !== post.id));
       if (editingPost?.id === post.id) {

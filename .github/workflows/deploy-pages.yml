@@ -36,6 +36,9 @@ jobs:
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
+      - name: Test database persistence behavior
+        run: npm run test:persistence
+
       - name: Build static site
         run: npx next build
         env:
