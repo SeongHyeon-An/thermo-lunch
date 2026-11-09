@@ -129,6 +129,27 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }
 
+function parseRatingSummary(result: unknown, cancelling: boolean) {
+  if (!Array.isArray(result) || result.length !== 1) throw new Error("Invalid rating response");
+  const summary = result[0];
+  if (!summary || typeof summary !== "object" || Array.isArray(summary)) throw new Error("Invalid rating summary");
+
+  const parseNumber = (value: unknown) => {
+    if (typeof value === "number") return value;
+    if (typeof value === "string" && /^\d+(?:\.\d+)?$/.test(value)) return Number(value);
+    return NaN;
+  };
+  const count = parseNumber(summary.count);
+  if (!Number.isSafeInteger(count) || count < 0) throw new Error("Invalid rating count");
+  if (count === 0) {
+    if (!cancelling || summary.average !== null) throw new Error("Invalid empty rating summary");
+    return { average: null, count };
+  }
+  const average = parseNumber(summary.average);
+  if (!Number.isFinite(average) || average < 0.5 || average > 5) throw new Error("Invalid rating average");
+  return { average, count };
+}
+
 export default function Home() {
   const [tab, setTab] = useState<"restaurants" | "board">("restaurants");
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
@@ -374,19 +395,17 @@ export default function Home() {
         method: "POST",
         body: JSON.stringify({ p_restaurant_id: selected.id, p_rating: nextRating, p_voter_hash: voterHash }),
       });
-      const summary = result?.[0];
-      if (summary) {
-        setRatingSummaries((items) => {
-          const others = items.filter((item) => item.restaurant_id !== selected.id);
-          return Number(summary.count) > 0
-            ? [...others, { restaurant_id: selected.id, average: Number(summary.average), count: Number(summary.count) }]
-            : others;
-        });
-      }
+      const summary = parseRatingSummary(result, nextRating === 0);
+      setRatingSummaries((items) => {
+        const others = items.filter((item) => item.restaurant_id !== selected.id);
+        return summary.average !== null
+          ? [...others, { restaurant_id: selected.id, average: summary.average, count: summary.count }]
+          : others;
+      });
       setNotice(nextRating ? `${nextRating}점으로 반영했어요.` : "내 별점을 취소했어요.");
     } catch {
       setRatingDraft(previousRating);
-      setNotice("별점을 저장하지 못했어요.");
+      setNotice("별점 변경 결과를 확인하지 못했어요. 이전 선택으로 복구했으니 다시 시도해 주세요.");
     } finally {
       setRatingSaving(false);
     }

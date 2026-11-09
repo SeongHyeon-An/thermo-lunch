@@ -20,25 +20,39 @@ const initialRestaurant = { id: 'r-test', name: '기존 식당', category: '한�
 const initialPost = { id: 'p-test', title: '기존 글', content: '기존 본문', author: '작성자', created_at: '2026-11-04T01:00:00Z', views: 0 };
 const initialReview = { id: 'v-test', restaurant_id: 'r-test', content: '기존 리뷰', author: '작성자', created_at: '2026-11-04T01:00:00Z' };
 
-async function harness({ configured = true, admin = true } = {}) {
+async function harness({ configured = true, admin = true, initialRating = 0, otherRatings = [] } = {}) {
   const dom = new JSDOM('<div id="root"></div>', { url: 'https://test.local/' });
   Object.assign(globalThis, { window: dom.window, document: dom.window.document, IS_REACT_ACT_ENVIRONMENT: true });
   const db = { restaurants: [structuredClone(initialRestaurant)], posts: [structuredClone(initialPost)], reviews: [structuredClone(initialReview)] };
   const writes = [];
   let failure = null;
+  let storedRating = initialRating;
+  let hasRatingReply = false;
+  let ratingReply;
+  const ratingSummary = () => {
+    const ratings = [...otherRatings, ...(storedRating ? [storedRating] : [])];
+    return { average: ratings.length ? Math.round(ratings.reduce((sum, value) => sum + value, 0) / ratings.length * 100) / 100 : null, count: ratings.length };
+  };
   const response = (data, status = 200) => new Response(JSON.stringify(data), { status });
   const fetch = async (url, init = {}) => {
     const parsed = new URL(url);
     const path = parsed.pathname.replace('/rest/v1/', '');
     const method = init.method || 'GET';
-    if (path === 'rpc/get_rating_summaries') return response([]);
-    if (path === 'rpc/get_my_rating') return response(0);
+    if (path === 'rpc/get_rating_summaries') return response(ratingSummary().count ? [{ restaurant_id: 'r-test', ...ratingSummary() }] : []);
+    if (path === 'rpc/get_my_rating') return response(storedRating);
     if (method === 'GET') return response(db[path]);
     writes.push({ path, method });
     if (failure === 'network') throw new TypeError('Network unavailable');
     if (failure === 'http') return response({ message: 'Service unavailable' }, 503);
     if (failure === 'empty') return response(path.startsWith('rpc/') ? false : []);
     const body = init.body ? JSON.parse(init.body) : null;
+    if (path === 'rpc/save_rating') {
+      assert.equal(body.p_restaurant_id, 'r-test');
+      assert.match(body.p_voter_hash, /^[0-9a-f]{64}$/);
+      if (hasRatingReply) return response(ratingReply);
+      storedRating = body.p_rating;
+      return response([ratingSummary()]);
+    }
     if (path.startsWith('rpc/')) {
       const [, operation, entity] = path.match(/rpc\/(update|delete)_(post|review)/);
       const table = `${entity}s`;
@@ -98,8 +112,14 @@ async function harness({ configured = true, admin = true } = {}) {
     await act(async () => form().dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true })));
     await flush();
   };
+  const rate = async (value) => {
+    const button = [...document.querySelectorAll('.ratingButtons button')].find(el => el.getAttribute('aria-label')?.split(',')[0] === `${value}점`);
+    assert.ok(button, `Missing rating: ${value}`);
+    await act(async () => button.click()); await flush();
+  };
   await mount();
-  return { db, writes, mount, click, openReview, form, fill, submit, fail: value => { failure = value; },
+  return { db, writes, mount, click, openReview, form, fill, submit, rate, fail: value => { failure = value; },
+    ratingReply: value => { hasRatingReply = true; ratingReply = value; },
     notice: () => document.querySelector('[role="status"]')?.textContent || '',
     close: async () => { await act(async () => root.unmount()); dom.window.close(); },
   };
@@ -213,5 +233,108 @@ for (const failure of ['http', 'network', 'empty', null]) test(`admin post delet
     else assert.match(h.notice(), /삭제했어요/);
     await h.mount(); await h.click(/^자유게시판/);
     assert.equal(document.body.textContent.includes('기존 글'), Boolean(failure));
+  } finally { await h.close(); }
+});
+
+function assertRatingSelection(value) {
+  const buttons = [...document.querySelectorAll('.ratingButtons button')];
+  const selected = buttons.filter(button => button.getAttribute('aria-pressed') === 'true');
+  assert.deepEqual(selected.map(button => button.getAttribute('aria-label')), value ? [`${value}점, 선택됨`] : []);
+  assert.ok(buttons.every(button => !button.disabled), 'saving lock must be released');
+}
+
+for (const value of [0.5, 4.5, 5]) test(`rating: ${value} save updates selection/average and survives API reload`, async () => {
+  const h = await harness({ otherRatings: [2, 3] });
+  try {
+    await h.openReview(); await h.rate(value);
+    assertRatingSelection(value); assert.equal(h.notice(), `${value}점으로 반영했어요.`);
+    const expectedAverage = (Math.round((2 + 3 + value) / 3 * 100) / 100).toFixed(1);
+    assert.equal(document.querySelector('.averageBox > b').textContent, `★ ${expectedAverage}`);
+    assert.equal(document.querySelector('.averageBox > small').textContent, '3개의 평가');
+    await h.mount(); await h.openReview();
+    assertRatingSelection(value);
+    assert.equal(document.querySelector('.averageBox > b').textContent, `★ ${expectedAverage}`);
+  } finally { await h.close(); }
+});
+
+for (const others of [[], [2, 3]]) test(`rating: cancellation succeeds with ${others.length} remaining votes`, async () => {
+  const h = await harness({ initialRating: 4.5, otherRatings: others });
+  try {
+    await h.openReview(); assertRatingSelection(4.5);
+    await h.rate(4.5); assertRatingSelection(0);
+    assert.equal(h.notice(), '내 별점을 취소했어요.');
+    const expected = others.length ? '★ 2.5' : '★ 평가 전';
+    assert.equal(document.querySelector('.averageBox > b').textContent, expected);
+    assert.equal(document.querySelector('.averageBox > small').textContent, `${others.length}개의 평가`);
+    await h.mount(); await h.openReview(); assertRatingSelection(0);
+    assert.equal(document.querySelector('.averageBox > b').textContent, expected);
+  } finally { await h.close(); }
+});
+
+test('rating: PostgreSQL numeric strings are valid, including zero-count cancellation', async () => {
+  const h = await harness();
+  try {
+    await h.openReview();
+    h.ratingReply([{ average: '4.5', count: '1' }]); await h.rate(4.5);
+    assertRatingSelection(4.5); assert.equal(h.notice(), '4.5점으로 반영했어요.');
+    assert.equal(document.querySelector('.averageBox > b').textContent, '★ 4.5');
+    h.ratingReply([{ average: null, count: '0' }]); await h.rate(4.5);
+    assertRatingSelection(0); assert.equal(h.notice(), '내 별점을 취소했어요.');
+  } finally { await h.close(); }
+});
+
+const invalidRatingReplies = [
+  ['null', null], ['empty array', []], ['object instead of array', { average: 4.5, count: 1 }],
+  ['null row', [null]], ['missing fields', [{}]], ['array row', [[4.5, 1]]],
+  ['multiple rows', [{ average: 4.5, count: 1 }, { average: 4.5, count: 1 }]],
+  ['non-numeric count', [{ average: 4.5, count: 'invalid' }]],
+  ['negative count', [{ average: 4.5, count: -1 }]],
+  ['fractional count', [{ average: 4.5, count: 1.5 }]],
+  ['unsafe count', [{ average: 4.5, count: Number.MAX_SAFE_INTEGER + 1 }]],
+  ['boolean count', [{ average: 4.5, count: true }]],
+  ['null average with votes', [{ average: null, count: 1 }]],
+  ['low average', [{ average: 0, count: 1 }]], ['high average', [{ average: 5.5, count: 1 }]],
+  ['blank average', [{ average: '', count: 1 }]], ['boolean average', [{ average: true, count: 1 }]],
+  ['array average', [{ average: [4.5], count: 1 }]],
+  ['non-finite average', [{ average: 'Infinity', count: 1 }]],
+  ['average with zero votes', [{ average: 4.5, count: 0 }]],
+];
+
+for (const action of ['save', 'cancel']) {
+  for (const [label, payload] of invalidRatingReplies) test(`rating ${action}: ${label} restores previous selection and preserves averages`, async () => {
+    const h = await harness({ initialRating: 3.5, otherRatings: [2] });
+    try {
+      await h.openReview();
+      const previousAverage = document.querySelector('.averageBox > b').textContent;
+      const previousCount = document.querySelector('.averageBox > small').textContent;
+      h.ratingReply(payload); await h.rate(action === 'save' ? 4.5 : 3.5);
+      assertRatingSelection(3.5);
+      assert.equal(document.querySelector('.averageBox > b').textContent, previousAverage);
+      assert.equal(document.querySelector('.averageBox > small').textContent, previousCount);
+      assert.match(h.notice(), /결과를 확인하지 못/);
+      assert.doesNotMatch(h.notice(), /반영했어요|취소했어요/);
+    } finally { await h.close(); }
+  });
+  for (const failure of ['network', 'http']) test(`rating ${action}: ${failure} failure rolls back and allows retry`, async () => {
+    const h = await harness({ initialRating: 3.5 });
+    try {
+      await h.openReview(); h.fail(failure);
+      await h.rate(action === 'save' ? 4.5 : 3.5);
+      assertRatingSelection(3.5); assert.match(h.notice(), /결과를 확인하지 못/);
+      assert.equal(document.querySelector('.averageBox > b').textContent, '★ 3.5');
+      assert.equal(document.querySelector('.averageBox > small').textContent, '1개의 평가');
+      h.fail(null); await h.rate(action === 'save' ? 4.5 : 3.5);
+      assertRatingSelection(action === 'save' ? 4.5 : 0);
+      assert.match(h.notice(), /반영했어요|취소했어요/);
+    } finally { await h.close(); }
+  });
+}
+
+test('rating save: an empty aggregate is not proof of a successful save', async () => {
+  const h = await harness({ initialRating: 3.5 });
+  try {
+    await h.openReview(); h.ratingReply([{ average: null, count: 0 }]); await h.rate(4.5);
+    assertRatingSelection(3.5); assert.match(h.notice(), /결과를 확인하지 못/);
+    assert.equal(document.querySelector('.averageBox > b').textContent, '★ 3.5');
   } finally { await h.close(); }
 });
