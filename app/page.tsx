@@ -170,10 +170,26 @@ export default function Home() {
   const [ratingDraft, setRatingDraft] = useState(0);
   const [ratingPreview, setRatingPreview] = useState<number | null>(null);
   const [ratingSaving, setRatingSaving] = useState(false);
+  const [ratingLoadedFor, setRatingLoadedFor] = useState<string | null>(null);
+  const [ratingLoadState, setRatingLoadState] = useState<"loading" | "ready" | "error">("loading");
+  const [ratingReload, setRatingReload] = useState(0);
+  const ratingContext = useRef<{ restaurantId: string; ready: boolean; saving: boolean; view: object } | null>(null);
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [notice, setNotice] = useState("");
   const restaurantResultsRef = useRef<HTMLElement>(null);
+
+  function selectRestaurant(item: Restaurant | null) {
+    // Invalidate synchronously, before the next effect or any queued response.
+    ratingContext.current = null;
+    setRatingLoadedFor(null);
+    setRatingLoadState("loading");
+    setRatingSaving(false);
+    setRatingDraft(0);
+    setRatingPreview(null);
+    setSelected(item);
+    setRatingReload((value) => value + 1);
+  }
 
   async function loadData() {
     if (!isConnected) {
@@ -213,25 +229,47 @@ export default function Home() {
   }, [notice]);
 
   useEffect(() => {
-    let active = true;
+    const view = {};
+    const context = selected ? { restaurantId: selected.id, ready: false, saving: false, view } : null;
+    ratingContext.current = context;
+    const isCurrent = () => context !== null && ratingContext.current === context;
+    const cleanup = () => { if (ratingContext.current?.view === view) ratingContext.current = null; };
     setRatingDraft(0);
     setRatingPreview(null);
-    if (!selected || !isConnected) return () => { active = false; };
+    setRatingSaving(false);
+    setRatingLoadedFor(null);
+    setRatingLoadState("loading");
+    if (!selected || !isConnected) {
+      setRatingLoadState("error");
+      return cleanup;
+    }
 
     getAnonymousVoterHash()
-      .then((voterHash) => supabaseRequest("rpc/get_my_rating", {
-        method: "POST",
-        body: JSON.stringify({ p_restaurant_id: selected.id, p_voter_hash: voterHash }),
-      }))
+      .then((voterHash) => {
+        if (!isCurrent()) return;
+        return supabaseRequest("rpc/get_my_rating", {
+          method: "POST",
+          body: JSON.stringify({ p_restaurant_id: selected.id, p_voter_hash: voterHash }),
+        });
+      })
       .then((rating) => {
-        if (active) setRatingDraft(Number(rating) || 0);
+        if (!isCurrent() || !context) return;
+        const value = typeof rating === "number" || (typeof rating === "string" && /^\d+(?:\.\d+)?$/.test(rating)) ? Number(rating) : NaN;
+        if (!Number.isFinite(value) || value < 0 || value > 5 || !Number.isInteger(value * 2)) throw new Error("Invalid own rating");
+        context.ready = true;
+        setRatingDraft(value);
+        setRatingLoadedFor(context.restaurantId);
+        setRatingLoadState("ready");
       })
       .catch(() => {
-        if (active) setNotice("내 별점 정보를 불러오지 못했어요.");
+        if (isCurrent()) {
+          setRatingLoadState("error");
+          setNotice("내 별점을 불러오지 못했어요. 별점 조회를 다시 시도해 주세요.");
+        }
       });
 
-    return () => { active = false; };
-  }, [selected]);
+    return cleanup;
+  }, [selected, ratingReload]);
 
   const ratingStats = useMemo(() => {
     const stats: Record<string, { average: number; count: number }> = {};
@@ -322,7 +360,7 @@ export default function Home() {
       });
       requireSavedRow(saved, row.id);
       setRestaurants((items) => editing ? items.map((item) => item.id === row.id ? row : item) : [row, ...items]);
-      setSelected(row);
+      selectRestaurant(row);
       setNotice(editing ? "식당 정보가 수정됐어요." : "새 식당이 추가됐어요.");
       setShowRestaurantForm(false);
       setEditing(null);
@@ -339,7 +377,7 @@ export default function Home() {
       const removed = await supabaseRequest(`restaurants?id=eq.${item.id}`, { method: "DELETE" });
       requireSavedRow(removed, item.id);
       setRestaurants((items) => items.filter((restaurant) => restaurant.id !== item.id));
-      setSelected(null);
+      selectRestaurant(null);
       setNotice("식당을 삭제했어요.");
     } catch {
       setNotice("삭제하지 못했어요. Supabase 설정을 확인해 주세요.");
@@ -382,7 +420,13 @@ export default function Home() {
 
   async function toggleRating(value: number) {
     if (!selected) return;
-    if (!requireConnection() || ratingSaving) return;
+    if (!requireConnection()) return;
+    const context = ratingContext.current;
+    if (!context || context.restaurantId !== selected.id || !context.ready || context.saving) return;
+    // A new identity invalidates any older read and also locks same-tick clicks.
+    const operation = { ...context, saving: true };
+    ratingContext.current = operation;
+    const isCurrent = () => ratingContext.current === operation;
     const previousRating = ratingDraft;
     const nextRating = previousRating === value ? 0 : value;
     setRatingPreview(null);
@@ -391,10 +435,12 @@ export default function Home() {
 
     try {
       const voterHash = await getAnonymousVoterHash();
+      if (!isCurrent()) return;
       const result = await supabaseRequest("rpc/save_rating", {
         method: "POST",
         body: JSON.stringify({ p_restaurant_id: selected.id, p_rating: nextRating, p_voter_hash: voterHash }),
       });
+      if (!isCurrent()) return;
       const summary = parseRatingSummary(result, nextRating === 0);
       setRatingSummaries((items) => {
         const others = items.filter((item) => item.restaurant_id !== selected.id);
@@ -404,10 +450,15 @@ export default function Home() {
       });
       setNotice(nextRating ? `${nextRating}점으로 반영했어요.` : "내 별점을 취소했어요.");
     } catch {
-      setRatingDraft(previousRating);
-      setNotice("별점 변경 결과를 확인하지 못했어요. 이전 선택으로 복구했으니 다시 시도해 주세요.");
+      if (isCurrent()) {
+        setRatingDraft(previousRating);
+        setNotice("별점 변경 결과를 확인하지 못했어요. 이전 선택으로 복구했으니 다시 시도해 주세요.");
+      }
     } finally {
-      setRatingSaving(false);
+      if (isCurrent()) {
+        operation.saving = false;
+        setRatingSaving(false);
+      }
     }
   }
 
@@ -507,11 +558,11 @@ export default function Home() {
   const openEdit = (item: Restaurant) => {
     setEditing(item);
     setShowRestaurantForm(true);
-    setSelected(null);
+    selectRestaurant(null);
   };
 
   const openRestaurant = (item: Restaurant) => {
-    setSelected(item);
+    selectRestaurant(item);
     setEditingReview(null);
     setReviewFormOpen(false);
     setRatingDraft(0);
@@ -679,11 +730,11 @@ export default function Home() {
       <footer><span className="brand footerBrand"><span className="brandMark">수</span><span>수서한끼</span></span><p>광평로 281의 더 맛있는 점심을 위해, 함께 채워가요.</p><small>매장 정보는 변동될 수 있으니 방문 전 확인해 주세요.</small></footer>
 
       {selected && (
-        <div className="drawerBackdrop" onMouseDown={(event) => event.target === event.currentTarget && setSelected(null)}>
+        <div className="drawerBackdrop" onMouseDown={(event) => event.target === event.currentTarget && selectRestaurant(null)}>
           <aside className="detailDrawer" role="dialog" aria-modal="true" aria-label={`${selected.name} 상세 정보`}>
             <div className="drawerTop">
               <div><p className="eyebrow dark">{selected.building} · {selected.distance}m</p><h2>{selected.name}</h2></div>
-              <button className="drawerClose" onClick={() => setSelected(null)} aria-label="닫기">×</button>
+              <button className="drawerClose" onClick={() => selectRestaurant(null)} aria-label="닫기">×</button>
             </div>
             <div className="drawerScroll">
               <div className="detailTags"><span>{selected.category}</span>{selected.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
@@ -699,6 +750,7 @@ export default function Home() {
                     className="ratingButtons"
                     role="group"
                     aria-label="내 별점 선택, 0.5점 단위"
+                    aria-busy={ratingLoadState === "loading" || ratingSaving}
                     onPointerLeave={() => setRatingPreview(null)}
                     onBlur={(event) => {
                       if (!event.currentTarget.contains(event.relatedTarget)) setRatingPreview(null);
@@ -719,18 +771,19 @@ export default function Home() {
                             className={`ratingHit ${half === 0 ? "firstHalf" : "secondHalf"}`}
                             aria-pressed={ratingDraft === value}
                             aria-label={`${value}점${ratingDraft === value ? ", 선택됨" : ""}`}
-                            disabled={ratingSaving}
-                            onPointerEnter={(event) => { if (event.pointerType !== "touch") setRatingPreview(value); }}
-                            onPointerMove={(event) => { if (event.pointerType !== "touch") setRatingPreview(value); }}
-                            onFocus={() => setRatingPreview(value)}
+                            disabled={ratingSaving || ratingLoadedFor !== selected.id}
+                            onPointerEnter={(event) => { if (ratingLoadedFor === selected.id && event.pointerType !== "touch") setRatingPreview(value); }}
+                            onPointerMove={(event) => { if (ratingLoadedFor === selected.id && event.pointerType !== "touch") setRatingPreview(value); }}
+                            onFocus={() => { if (ratingLoadedFor === selected.id) setRatingPreview(value); }}
                             onClick={() => void toggleRating(value)}
                           />
                         ))}
                       </span>
                     ))}
                   </div>
-                  <strong aria-live="polite">{ratingSaving ? "저장 중…" : ratingPreview !== null ? `${ratingPreview}점 미리보기` : ratingDraft ? `${ratingDraft}점 선택됨` : "선택 안 됨"}</strong>
+                  <strong aria-live="polite">{ratingLoadState === "loading" ? "내 별점 조회 중…" : ratingLoadState === "error" ? "내 별점 조회 실패" : ratingSaving ? "저장 중…" : ratingPreview !== null ? `${ratingPreview}점 미리보기` : ratingDraft ? `${ratingDraft}점 선택됨` : "선택 안 됨"}</strong>
                 </div>
+                {ratingLoadState === "error" && <button className="secondaryButton" type="button" onClick={() => setRatingReload((value) => value + 1)}>별점 조회 재시도</button>}
               </div>
 
               {isAdmin && <div className="adminDrawerActions"><button className="secondaryButton danger" onClick={() => removeRestaurant(selected)}>식당 삭제</button><button className="primaryButton" onClick={() => openEdit(selected)}>식당 정보 수정</button></div>}

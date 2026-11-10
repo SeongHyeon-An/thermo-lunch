@@ -20,17 +20,31 @@ const initialRestaurant = { id: 'r-test', name: '기존 식당', category: '한�
 const initialPost = { id: 'p-test', title: '기존 글', content: '기존 본문', author: '작성자', created_at: '2026-11-04T01:00:00Z', views: 0 };
 const initialReview = { id: 'v-test', restaurant_id: 'r-test', content: '기존 리뷰', author: '작성자', created_at: '2026-11-04T01:00:00Z' };
 
-async function harness({ configured = true, admin = true, initialRating = 0, otherRatings = [] } = {}) {
+async function harness({ configured = true, admin = true, initialRating = 0, otherRatings = [], secondRating = null } = {}) {
   const dom = new JSDOM('<div id="root"></div>', { url: 'https://test.local/' });
   Object.assign(globalThis, { window: dom.window, document: dom.window.document, IS_REACT_ACT_ENVIRONMENT: true });
   const db = { restaurants: [structuredClone(initialRestaurant)], posts: [structuredClone(initialPost)], reviews: [structuredClone(initialReview)] };
+  if (secondRating !== null) db.restaurants.push({ ...structuredClone(initialRestaurant), id: 'r-other', name: '다른 식당' });
   const writes = [];
   let failure = null;
-  let storedRating = initialRating;
+  const storedRatings = new Map([['r-test', initialRating], ['r-other', secondRating || 0]]);
+  const readRequests = [];
+  const delayedReads = [];
+  const delayedSaves = [];
+  const delay = (queue) => {
+    let resolve, reject;
+    const promise = new Promise((ok, fail) => { resolve = ok; reject = fail; });
+    queue.push({ promise });
+    return {
+      resolve: async value => { await act(async () => resolve(value)); await flush(); },
+      reject: async error => { await act(async () => reject(error)); await flush(); },
+    };
+  };
   let hasRatingReply = false;
   let ratingReply;
-  const ratingSummary = () => {
-    const ratings = [...otherRatings, ...(storedRating ? [storedRating] : [])];
+  const ratingSummary = (restaurantId = 'r-test') => {
+    const storedRating = storedRatings.get(restaurantId) || 0;
+    const ratings = [...(restaurantId === 'r-test' ? otherRatings : []), ...(storedRating ? [storedRating] : [])];
     return { average: ratings.length ? Math.round(ratings.reduce((sum, value) => sum + value, 0) / ratings.length * 100) / 100 : null, count: ratings.length };
   };
   const response = (data, status = 200) => new Response(JSON.stringify(data), { status });
@@ -38,20 +52,27 @@ async function harness({ configured = true, admin = true, initialRating = 0, oth
     const parsed = new URL(url);
     const path = parsed.pathname.replace('/rest/v1/', '');
     const method = init.method || 'GET';
-    if (path === 'rpc/get_rating_summaries') return response(ratingSummary().count ? [{ restaurant_id: 'r-test', ...ratingSummary() }] : []);
-    if (path === 'rpc/get_my_rating') return response(storedRating);
+    if (path === 'rpc/get_rating_summaries') return response(db.restaurants.flatMap(row => ratingSummary(row.id).count ? [{ restaurant_id: row.id, ...ratingSummary(row.id) }] : []));
+    if (path === 'rpc/get_my_rating') {
+      const restaurantId = JSON.parse(init.body).p_restaurant_id;
+      readRequests.push(restaurantId);
+      const heldRead = delayedReads.shift();
+      return response(heldRead ? await heldRead.promise : storedRatings.get(restaurantId) || 0);
+    }
     if (method === 'GET') return response(db[path]);
-    writes.push({ path, method });
+    writes.push({ path, method, body: init.body ? JSON.parse(init.body) : null });
     if (failure === 'network') throw new TypeError('Network unavailable');
     if (failure === 'http') return response({ message: 'Service unavailable' }, 503);
     if (failure === 'empty') return response(path.startsWith('rpc/') ? false : []);
     const body = init.body ? JSON.parse(init.body) : null;
     if (path === 'rpc/save_rating') {
-      assert.equal(body.p_restaurant_id, 'r-test');
+      assert.ok(db.restaurants.some(row => row.id === body.p_restaurant_id));
       assert.match(body.p_voter_hash, /^[0-9a-f]{64}$/);
       if (hasRatingReply) return response(ratingReply);
-      storedRating = body.p_rating;
-      return response([ratingSummary()]);
+      storedRatings.set(body.p_restaurant_id, body.p_rating);
+      const summary = [ratingSummary(body.p_restaurant_id)];
+      const heldSave = delayedSaves.shift();
+      return response(heldSave ? (await heldSave.promise) ?? summary : summary);
     }
     if (path.startsWith('rpc/')) {
       const [, operation, entity] = path.match(/rpc\/(update|delete)_(post|review)/);
@@ -118,7 +139,8 @@ async function harness({ configured = true, admin = true, initialRating = 0, oth
     await act(async () => button.click()); await flush();
   };
   await mount();
-  return { db, writes, mount, click, openReview, form, fill, submit, rate, fail: value => { failure = value; },
+  return { db, writes, readRequests, mount, click, openReview, form, fill, submit, rate, flush, fail: value => { failure = value; },
+    deferRatingRead: () => delay(delayedReads), deferRatingSave: () => delay(delayedSaves),
     ratingReply: value => { hasRatingReply = true; ratingReply = value; },
     notice: () => document.querySelector('[role="status"]')?.textContent || '',
     close: async () => { await act(async () => root.unmount()); dom.window.close(); },
@@ -336,5 +358,141 @@ test('rating save: an empty aggregate is not proof of a successful save', async 
     await h.openReview(); h.ratingReply([{ average: null, count: 0 }]); await h.rate(4.5);
     assertRatingSelection(3.5); assert.match(h.notice(), /결과를 확인하지 못/);
     assert.equal(document.querySelector('.averageBox > b').textContent, '★ 3.5');
+  } finally { await h.close(); }
+});
+
+function assertRatingLocked(label) {
+  const buttons = [...document.querySelectorAll('.ratingButtons button')];
+  assert.equal(buttons.length, 10);
+  assert.ok(buttons.every(button => button.disabled));
+  assert.match(document.querySelector('.inlineRatingControl > strong').textContent, label);
+}
+
+async function closeRatingDrawer(h) {
+  await h.click('×', document.querySelector('.detailDrawer'));
+}
+
+test('rating race: initial read delay blocks all clicks until the saved score is known', async () => {
+  const h = await harness({ initialRating: 3.5 });
+  try {
+    const read = h.deferRatingRead();
+    await h.openReview(); assert.equal(h.readRequests.length, 1);
+    assertRatingLocked(/조회 중/);
+    await h.rate(4.5); await h.rate(3.5);
+    assert.equal(h.writes.length, 0, 'no speculative writes before initial read');
+    await read.resolve(3.5); assertRatingSelection(3.5);
+    await h.rate(4.5); assertRatingSelection(4.5);
+    assert.equal(h.writes.at(-1).body.p_rating, 4.5);
+  } finally { await h.close(); }
+});
+
+test('rating race: clicking an existing score after delayed load sends cancellation, not a duplicate save', async () => {
+  const h = await harness({ initialRating: 4.5 });
+  try {
+    const read = h.deferRatingRead(); await h.openReview();
+    await h.rate(4.5); assert.equal(h.writes.length, 0);
+    await read.resolve('4.5'); assertRatingSelection(4.5);
+    await h.rate(4.5); assertRatingSelection(0);
+    assert.equal(h.writes.at(-1).body.p_rating, 0);
+    assert.equal(h.notice(), '내 별점을 취소했어요.');
+  } finally { await h.close(); }
+});
+
+test('rating race: an old read arriving after reopen and successful save cannot overwrite the latest score', async () => {
+  const h = await harness({ initialRating: 1 });
+  try {
+    const oldRead = h.deferRatingRead(); await h.openReview();
+    await closeRatingDrawer(h); await h.openReview();
+    assertRatingSelection(1); assert.equal(h.readRequests.length, 2);
+    await h.rate(4.5); assertRatingSelection(4.5);
+    await oldRead.resolve(1);
+    assertRatingSelection(4.5);
+    assert.equal(document.querySelector('.averageBox > b').textContent, '★ 4.5');
+    assert.equal(h.notice(), '4.5점으로 반영했어요.');
+  } finally { await h.close(); }
+});
+
+for (const outcome of ['success', 'failure']) test(`rating race: old read ${outcome} is ignored after switching restaurants`, async () => {
+  const h = await harness({ initialRating: 1, secondRating: 2.5 });
+  try {
+    const oldRead = h.deferRatingRead(); await h.openReview();
+    await closeRatingDrawer(h); await h.openReview('다른 식당'); assertRatingSelection(2.5);
+    if (outcome === 'success') await oldRead.resolve(1);
+    else await oldRead.reject(new TypeError('Old read failed'));
+    assertRatingSelection(2.5);
+    assert.equal(document.querySelector('.drawerTop h2').textContent, '다른 식당');
+    assert.equal(document.querySelector('.averageBox > b').textContent, '★ 2.5');
+    assert.doesNotMatch(h.notice(), /불러오지 못/);
+  } finally { await h.close(); }
+});
+
+test('rating race: stale save success cannot overwrite a newer restaurant selection or success notice', async () => {
+  const h = await harness({ initialRating: 1, secondRating: 2.5 });
+  try {
+    await h.openReview(); const oldSave = h.deferRatingSave();
+    await h.rate(4.5); assertRatingLocked(/저장 중/);
+    await closeRatingDrawer(h); await h.openReview('다른 식당'); assertRatingSelection(2.5);
+    await h.rate(0.5); assertRatingSelection(0.5);
+    await oldSave.resolve();
+    assertRatingSelection(0.5);
+    assert.equal(document.querySelector('.averageBox > b').textContent, '★ 0.5');
+    assert.equal(h.notice(), '0.5점으로 반영했어요.');
+  } finally { await h.close(); }
+});
+
+test('rating race: stale save failure cannot roll back or unlock a different pending save', async () => {
+  const h = await harness({ initialRating: 1, secondRating: 2.5 });
+  try {
+    await h.openReview(); const oldSave = h.deferRatingSave(); await h.rate(4.5);
+    await closeRatingDrawer(h); await h.openReview('다른 식당');
+    const newSave = h.deferRatingSave(); await h.rate(0.5); assertRatingLocked(/저장 중/);
+    await oldSave.reject(new TypeError('Old save failed'));
+    assertRatingLocked(/저장 중/);
+    assert.doesNotMatch(h.notice(), /결과를 확인하지 못/);
+    assert.equal(document.querySelector('[aria-pressed="true"]').getAttribute('aria-label'), '0.5점, 선택됨');
+    await newSave.resolve(); assertRatingSelection(0.5);
+    assert.equal(h.notice(), '0.5점으로 반영했어요.');
+  } finally { await h.close(); }
+});
+
+test('rating read: failure keeps writes locked and successful retry restores cancellation behavior', async () => {
+  const h = await harness({ initialRating: 4.5 });
+  try {
+    const read = h.deferRatingRead(); await h.openReview();
+    await read.reject(new TypeError('Read failed')); assertRatingLocked(/조회 실패/);
+    await h.rate(4.5); assert.equal(h.writes.length, 0);
+    await h.click('별점 조회 재시도'); assertRatingSelection(4.5);
+    await h.rate(4.5); assertRatingSelection(0);
+    assert.equal(h.writes.at(-1).body.p_rating, 0);
+  } finally { await h.close(); }
+});
+
+for (const invalid of [null, 'invalid', 2.25, 6]) test(`rating read: invalid initial score ${JSON.stringify(invalid)} never enables writes`, async () => {
+  const h = await harness();
+  try {
+    const read = h.deferRatingRead(); await h.openReview(); await read.resolve(invalid);
+    assertRatingLocked(/조회 실패/);
+    await h.rate(4.5); assert.equal(h.writes.length, 0);
+  } finally { await h.close(); }
+});
+
+test('rating race: synchronous double click sends only one pending mutation', async () => {
+  const h = await harness({ initialRating: 1 });
+  try {
+    await h.openReview(); const save = h.deferRatingSave();
+    const button = document.querySelector('[aria-label="4.5점"]');
+    await act(async () => { button.click(); button.click(); }); await h.flush();
+    assert.equal(h.writes.length, 1); assertRatingLocked(/저장 중/);
+    await save.resolve(); assertRatingSelection(4.5);
+  } finally { await h.close(); }
+});
+
+test('rating race: reselecting the same restaurant starts a new read instead of leaving input locked', async () => {
+  const h = await harness({ initialRating: 2.5 });
+  try {
+    await h.openReview(); assertRatingSelection(2.5);
+    const nextRead = h.deferRatingRead(); await h.openReview();
+    assert.equal(h.readRequests.length, 2); assertRatingLocked(/조회 중/);
+    await nextRead.resolve(2.5); assertRatingSelection(2.5);
   } finally { await h.close(); }
 });
