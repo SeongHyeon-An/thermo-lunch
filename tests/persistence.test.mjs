@@ -20,7 +20,7 @@ const initialRestaurant = { id: 'r-test', name: '기존 식당', category: '한�
 const initialPost = { id: 'p-test', title: '기존 글', content: '기존 본문', author: '작성자', created_at: '2026-11-04T01:00:00Z', views: 0 };
 const initialReview = { id: 'v-test', restaurant_id: 'r-test', content: '기존 리뷰', author: '작성자', created_at: '2026-11-04T01:00:00Z' };
 
-async function harness({ configured = true, admin = true, initialRating = 0, otherRatings = [], secondRating = null } = {}) {
+async function harness({ configured = true, admin = true, initialRating = 0, otherRatings = [], secondRating = null, initialReadFailures = [], initialListDelays = [] } = {}) {
   const dom = new JSDOM('<div id="root"></div>', { url: 'https://test.local/' });
   Object.assign(globalThis, { window: dom.window, document: dom.window.document, IS_REACT_ACT_ENVIRONMENT: true });
   const db = { restaurants: [structuredClone(initialRestaurant)], posts: [structuredClone(initialPost)], reviews: [structuredClone(initialReview)] };
@@ -31,6 +31,9 @@ async function harness({ configured = true, admin = true, initialRating = 0, oth
   const readRequests = [];
   const delayedReads = [];
   const delayedSaves = [];
+  const delayedLists = Object.fromEntries(['restaurants', 'posts', 'reviews', 'ratings'].map(key => [key, []]));
+  const listReads = [];
+  let readFailures = new Set(initialReadFailures);
   const delay = (queue) => {
     let resolve, reject;
     const promise = new Promise((ok, fail) => { resolve = ok; reject = fail; });
@@ -40,6 +43,7 @@ async function harness({ configured = true, admin = true, initialRating = 0, oth
       reject: async error => { await act(async () => reject(error)); await flush(); },
     };
   };
+  const heldInitialLists = Object.fromEntries(initialListDelays.map(key => [key, delay(delayedLists[key])]));
   let hasRatingReply = false;
   let ratingReply;
   const ratingSummary = (restaurantId = 'r-test') => {
@@ -48,18 +52,26 @@ async function harness({ configured = true, admin = true, initialRating = 0, oth
     return { average: ratings.length ? Math.round(ratings.reduce((sum, value) => sum + value, 0) / ratings.length * 100) / 100 : null, count: ratings.length };
   };
   const response = (data, status = 200) => new Response(JSON.stringify(data), { status });
+  const readList = async (resource, data) => {
+    listReads.push(resource);
+    const snapshot = structuredClone(data);
+    const failing = readFailures.has(resource);
+    const held = delayedLists[resource].shift();
+    const result = held ? (await held.promise) ?? snapshot : snapshot;
+    return failing ? response({ message: 'Read unavailable' }, 503) : response(result);
+  };
   const fetch = async (url, init = {}) => {
     const parsed = new URL(url);
     const path = parsed.pathname.replace('/rest/v1/', '');
     const method = init.method || 'GET';
-    if (path === 'rpc/get_rating_summaries') return response(db.restaurants.flatMap(row => ratingSummary(row.id).count ? [{ restaurant_id: row.id, ...ratingSummary(row.id) }] : []));
+    if (path === 'rpc/get_rating_summaries') return readList('ratings', db.restaurants.flatMap(row => ratingSummary(row.id).count ? [{ restaurant_id: row.id, ...ratingSummary(row.id) }] : []));
     if (path === 'rpc/get_my_rating') {
       const restaurantId = JSON.parse(init.body).p_restaurant_id;
       readRequests.push(restaurantId);
       const heldRead = delayedReads.shift();
       return response(heldRead ? await heldRead.promise : storedRatings.get(restaurantId) || 0);
     }
-    if (method === 'GET') return response(db[path]);
+    if (method === 'GET') return readList(path, db[path]);
     writes.push({ path, method, body: init.body ? JSON.parse(init.body) : null });
     if (failure === 'network') throw new TypeError('Network unavailable');
     if (failure === 'http') return response({ message: 'Service unavailable' }, 503);
@@ -91,7 +103,13 @@ async function harness({ configured = true, admin = true, initialRating = 0, oth
     const row = db[path].find(item => item.id === id);
     if (!row) return response([]);
     if (method === 'PATCH') Object.assign(row, body);
-    if (method === 'DELETE') db[path] = db[path].filter(item => item.id !== id);
+    if (method === 'DELETE') {
+      db[path] = db[path].filter(item => item.id !== id);
+      if (path === 'restaurants') {
+        db.reviews = db.reviews.filter(item => item.restaurant_id !== id);
+        storedRatings.delete(id);
+      }
+    }
     return response([row]);
   };
   dom.window.confirm = () => true;
@@ -138,9 +156,15 @@ async function harness({ configured = true, admin = true, initialRating = 0, oth
     assert.ok(button, `Missing rating: ${value}`);
     await act(async () => button.click()); await flush();
   };
+  const retry = async (times = 1) => {
+    const button = [...document.querySelectorAll('button')].find(el => el.textContent === '연결 재시도');
+    assert.ok(button, 'Missing retry button');
+    await act(async () => { for (let i = 0; i < times; i++) button.click(); }); await flush();
+  };
   await mount();
-  return { db, writes, readRequests, mount, click, openReview, form, fill, submit, rate, flush, fail: value => { failure = value; },
+  return { db, writes, readRequests, listReads, heldInitialLists, mount, click, openReview, form, fill, submit, rate, retry, flush, fail: value => { failure = value; },
     deferRatingRead: () => delay(delayedReads), deferRatingSave: () => delay(delayedSaves),
+    deferListRead: resource => delay(delayedLists[resource]), failLists: resources => { readFailures = new Set(resources); },
     ratingReply: value => { hasRatingReply = true; ratingReply = value; },
     notice: () => document.querySelector('[role="status"]')?.textContent || '',
     close: async () => { await act(async () => root.unmount()); dom.window.close(); },
@@ -494,5 +518,139 @@ test('rating race: reselecting the same restaurant starts a new read instead of 
     const nextRead = h.deferRatingRead(); await h.openReview();
     assert.equal(h.readRequests.length, 2); assertRatingLocked(/조회 중/);
     await nextRead.resolve(2.5); assertRatingSelection(2.5);
+  } finally { await h.close(); }
+});
+
+for (const [name, entity] of Object.entries(entities)) {
+  test(`list race: delayed initial ${entity.table} read preserves both a new ${name} and pre-existing rows`, async () => {
+    const h = await harness({ initialListDelays: [entity.table] });
+    try {
+      await entity.open(h); h.fill(entity.values); await h.submit();
+      assert.match(h.notice(), /추가됐어요|등록했어요|남겼어요/);
+      await h.heldInitialLists[entity.table].resolve();
+      assert.ok(document.body.textContent.includes(entity.initial));
+      assert.ok(document.body.textContent.includes(entity.values[entity.field]));
+      assert.equal(h.listReads.filter(resource => resource === entity.table).length, 2);
+      assert.equal(h.listReads.filter(resource => resource !== entity.table).length, 3, 'only the changed resource is re-read');
+    } finally { await h.close(); }
+  });
+
+  for (const operation of ['edit', 'delete']) test(`list race: delayed retry cannot undo ${name} ${operation}`, async () => {
+    const h = await harness({ initialReadFailures: ['ratings'] });
+    try {
+      h.failLists([]);
+      const oldRead = h.deferListRead(entity.table); await h.retry();
+      if (operation === 'edit') {
+        await entity.edit(h);
+        h.fill({ [entity.field]: '변경 보존', ...(name === 'restaurant' ? {} : { password: 'test-password' }) });
+        await h.submit();
+      } else await entity.remove(h);
+      await oldRead.resolve();
+      assert.ok(!document.body.textContent.includes(entity.initial));
+      if (operation === 'edit') assert.ok(document.body.textContent.includes('변경 보존'));
+      assert.equal(h.listReads.filter(resource => resource === entity.table).length, 3);
+      assert.ok(document.body.textContent.includes('공용 데이터 연결됨'));
+    } finally { await h.close(); }
+  });
+}
+
+for (const outcome of ['success', 'failure']) test(`list race: older retry ${outcome} cannot overwrite a newer retry`, async () => {
+  const h = await harness({ initialReadFailures: ['ratings'] });
+  try {
+    h.failLists([]);
+    const oldRead = h.deferListRead('posts');
+    const newRead = h.deferListRead('posts');
+    await h.retry(2);
+    assert.equal(h.listReads.filter(key => key === 'posts').length, 3, 'both retries must overlap');
+    await newRead.resolve([{ ...initialPost, title: '최신 조회 글' }]);
+    await h.click(/^자유게시판/);
+    assert.ok(document.body.textContent.includes('최신 조회 글'));
+    if (outcome === 'success') await oldRead.resolve([{ ...initialPost, title: '과거 조회 글' }]);
+    else {
+      await entities.post.open(h); h.fill(entities.post.values); await h.submit();
+      assert.equal(h.notice(), '게시글을 등록했어요.');
+      await oldRead.reject(new TypeError('Old read failed'));
+      assert.equal(h.notice(), '게시글을 등록했어요.');
+    }
+    assert.ok(document.body.textContent.includes('최신 조회 글'));
+    assert.ok(!document.body.textContent.includes('과거 조회 글'));
+    assert.ok(document.body.textContent.includes('공용 데이터 연결됨'));
+  } finally { await h.close(); }
+});
+
+test('list race: older successful batch cannot hide the latest partial failure', async () => {
+  const h = await harness({ initialReadFailures: ['ratings'] });
+  try {
+    h.failLists([]);
+    const oldPosts = h.deferListRead('posts'), newPosts = h.deferListRead('posts');
+    const oldRatings = h.deferListRead('ratings'), newRatings = h.deferListRead('ratings');
+    await h.retry(2);
+    await newPosts.resolve([{ ...initialPost, title: '최신 부분 조회' }]);
+    await newRatings.reject(new TypeError('Latest ratings unavailable'));
+    assert.ok(document.body.textContent.includes('일부 데이터 연결 실패'));
+    await oldPosts.resolve([{ ...initialPost, title: '이전 조회' }]);
+    await oldRatings.resolve([]);
+    await h.click(/^자유게시판/);
+    assert.ok(document.body.textContent.includes('최신 부분 조회'));
+    assert.ok(!document.querySelector('.post h3').textContent.includes('이전 조회'));
+    assert.ok(document.body.textContent.includes('일부 데이터 연결 실패'));
+  } finally { await h.close(); }
+});
+
+for (const failedResource of ['restaurants', 'posts', 'reviews', 'ratings']) test(`list race: ${failedResource} read failure does not discard confirmed writes or other results`, async () => {
+  const h = await harness({ initialReadFailures: ['ratings'] });
+  try {
+    h.failLists([failedResource]);
+    const blocker = failedResource === 'ratings' ? 'reviews' : 'ratings';
+    const pending = h.deferListRead(blocker); await h.retry();
+    await entities.post.open(h); h.fill(entities.post.values); await h.submit();
+    await pending.resolve();
+    assert.ok(document.body.textContent.includes('새 글'));
+    assert.ok(document.body.textContent.includes('기존 글'));
+    assert.equal(document.querySelectorAll('.post').length, 2);
+    assert.ok(document.body.textContent.includes('일부 데이터 연결 실패'));
+    h.failLists([]); await h.retry();
+    assert.ok(document.body.textContent.includes('공용 데이터 연결됨'));
+    assert.equal(document.querySelectorAll('.post').length, 2);
+  } finally { await h.close(); }
+});
+
+for (const action of ['save', 'cancel']) test(`list race: delayed aggregate cannot undo confirmed rating ${action}`, async () => {
+  const h = await harness({ initialRating: 3.5, initialListDelays: ['ratings'] });
+  try {
+    await h.openReview(); await h.rate(action === 'save' ? 4.5 : 3.5);
+    const expected = action === 'save' ? '★ 4.5' : '★ 평가 전';
+    assert.equal(document.querySelector('.averageBox > b').textContent, expected);
+    await h.heldInitialLists.ratings.resolve();
+    assert.equal(document.querySelector('.averageBox > b').textContent, expected);
+    assertRatingSelection(action === 'save' ? 4.5 : 0);
+    assert.equal(h.listReads.filter(key => key === 'ratings').length, 2);
+  } finally { await h.close(); }
+});
+
+test('list race: restaurant deletion also invalidates delayed child reviews and rating aggregates', async () => {
+  const h = await harness({ initialRating: 4.5, initialReadFailures: ['ratings'] });
+  try {
+    h.failLists([]);
+    const reviews = h.deferListRead('reviews'), ratings = h.deferListRead('ratings');
+    await h.retry(); await entities.restaurant.remove(h);
+    await reviews.resolve(); await ratings.resolve();
+    assert.equal(document.querySelectorAll('.restaurantCard').length, 0);
+    assert.equal(h.listReads.filter(key => key === 'reviews').length, 3);
+    assert.equal(h.listReads.filter(key => key === 'ratings').length, 3);
+    assert.equal(h.db.reviews.length, 0);
+    assert.ok(document.body.textContent.includes('공용 데이터 연결됨'));
+  } finally { await h.close(); }
+});
+
+test('list race: responses from an unmounted page do not change a freshly mounted page', async () => {
+  const h = await harness({ initialListDelays: ['posts'] });
+  try {
+    const oldRead = h.heldInitialLists.posts;
+    h.db.posts = [{ ...initialPost, title: '새 화면 데이터' }];
+    await h.mount(); await h.click(/^자유게시판/);
+    await oldRead.resolve([{ ...initialPost, title: '이전 화면 데이터' }]);
+    assert.equal(document.querySelector('.post h3').textContent, '새 화면 데이터');
+    assert.ok(document.body.textContent.includes('공용 데이터 연결됨'));
   } finally { await h.close(); }
 });

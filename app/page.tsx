@@ -41,6 +41,7 @@ type RatingSummary = {
 };
 
 type ConnectionStatus = "loading" | "connected" | "partial" | "offline";
+type DataResource = "restaurants" | "posts" | "reviews" | "ratings";
 
 const ADMIN_PASSWORD_HASH = "c7680b18671c306147e947131d5a66e56f5a07c6a5de74d2d7773b48412ea24d";
 const CATEGORY_TABS = ["전체", "한식", "중식", "양식", "일식", "기타"];
@@ -178,6 +179,8 @@ export default function Home() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [notice, setNotice] = useState("");
   const restaurantResultsRef = useRef<HTMLElement>(null);
+  const loadRequest = useRef(0);
+  const dataVersions = useRef<Record<DataResource, number>>({ restaurants: 0, posts: 0, reviews: 0, ratings: 0 });
 
   function selectRestaurant(item: Restaurant | null) {
     // Invalidate synchronously, before the next effect or any queued response.
@@ -192,6 +195,7 @@ export default function Home() {
   }
 
   async function loadData() {
+    const request = ++loadRequest.current;
     if (!isConnected) {
       setConnectionStatus("offline");
       setNotice("Supabase 연결 정보가 없어 데이터를 불러올 수 없어요.");
@@ -199,18 +203,25 @@ export default function Home() {
     }
 
     setConnectionStatus("loading");
+    async function loadList<T>(resource: DataResource, path: string, setItems: (items: T[]) => void, init?: RequestInit) {
+      while (request === loadRequest.current) {
+        const version = dataVersions.current[resource];
+        const rows = await supabaseRequest(path, init);
+        if (request !== loadRequest.current) return;
+        // A confirmed mutation makes this snapshot stale. Re-read only this list
+        // so initial-load additions also retain existing, previously unseen rows.
+        if (version !== dataVersions.current[resource]) continue;
+        setItems(Array.isArray(rows) ? rows : []);
+        return;
+      }
+    }
     const results = await Promise.allSettled([
-      supabaseRequest("restaurants?select=*&order=distance.asc"),
-      supabaseRequest("posts?select=id,title,content,author,created_at,views&order=created_at.desc"),
-      supabaseRequest("reviews?select=id,restaurant_id,author,content,created_at&order=created_at.desc"),
-      supabaseRequest("rpc/get_rating_summaries", { method: "POST", body: "{}" }),
+      loadList("restaurants", "restaurants?select=*&order=distance.asc", setRestaurants),
+      loadList("posts", "posts?select=id,title,content,author,created_at,views&order=created_at.desc", setPosts),
+      loadList("reviews", "reviews?select=id,restaurant_id,author,content,created_at&order=created_at.desc", setReviews),
+      loadList("ratings", "rpc/get_rating_summaries", setRatingSummaries, { method: "POST", body: "{}" }),
     ]);
-    const [restaurantResult, postResult, reviewResult, ratingResult] = results;
-
-    if (restaurantResult.status === "fulfilled") setRestaurants(Array.isArray(restaurantResult.value) ? restaurantResult.value : []);
-    if (postResult.status === "fulfilled") setPosts(Array.isArray(postResult.value) ? postResult.value : []);
-    if (reviewResult.status === "fulfilled") setReviews(Array.isArray(reviewResult.value) ? reviewResult.value : []);
-    if (ratingResult.status === "fulfilled") setRatingSummaries(Array.isArray(ratingResult.value) ? ratingResult.value : []);
+    if (request !== loadRequest.current) return;
 
     const hasFailure = results.some((result) => result.status === "rejected");
     setConnectionStatus(hasFailure ? "partial" : "connected");
@@ -220,6 +231,7 @@ export default function Home() {
   useEffect(() => {
     setIsAdmin(sessionStorage.getItem("suseo-admin") === "1");
     void loadData();
+    return () => { loadRequest.current += 1; };
   }, []);
 
   useEffect(() => {
@@ -359,6 +371,7 @@ export default function Home() {
         body: JSON.stringify(row),
       });
       requireSavedRow(saved, row.id);
+      dataVersions.current.restaurants += 1;
       setRestaurants((items) => editing ? items.map((item) => item.id === row.id ? row : item) : [row, ...items]);
       selectRestaurant(row);
       setNotice(editing ? "식당 정보가 수정됐어요." : "새 식당이 추가됐어요.");
@@ -376,7 +389,12 @@ export default function Home() {
     try {
       const removed = await supabaseRequest(`restaurants?id=eq.${item.id}`, { method: "DELETE" });
       requireSavedRow(removed, item.id);
+      dataVersions.current.restaurants += 1;
+      dataVersions.current.reviews += 1;
+      dataVersions.current.ratings += 1;
       setRestaurants((items) => items.filter((restaurant) => restaurant.id !== item.id));
+      setReviews((items) => items.filter((review) => review.restaurant_id !== item.id));
+      setRatingSummaries((items) => items.filter((summary) => summary.restaurant_id !== item.id));
       selectRestaurant(null);
       setNotice("식당을 삭제했어요.");
     } catch {
@@ -401,6 +419,7 @@ export default function Home() {
           body: JSON.stringify({ p_id: editingReview.id, p_author: author, p_content: content, p_password_hash: passwordHash }),
         });
         if (updated !== true) return setNotice("수정하지 못했어요. 비밀번호 또는 리뷰 존재 여부를 확인해 주세요.");
+        dataVersions.current.reviews += 1;
         setReviews((items) => items.map((review) => review.id === editingReview.id ? { ...review, author, content } : review));
         setEditingReview(null);
         setNotice("리뷰를 수정했어요.");
@@ -408,6 +427,7 @@ export default function Home() {
         const review: Review = { id: crypto.randomUUID(), restaurant_id: selected.id, author, content, password_hash: passwordHash, created_at: new Date().toISOString() };
         const saved = await supabaseRequest("reviews", { method: "POST", body: JSON.stringify(review) });
         requireSavedRow(saved, review.id);
+        dataVersions.current.reviews += 1;
         setReviews((items) => [review, ...items]);
         setNotice("리뷰를 남겼어요.");
       }
@@ -442,6 +462,7 @@ export default function Home() {
       });
       if (!isCurrent()) return;
       const summary = parseRatingSummary(result, nextRating === 0);
+      dataVersions.current.ratings += 1;
       setRatingSummaries((items) => {
         const others = items.filter((item) => item.restaurant_id !== selected.id);
         return summary.average !== null
@@ -470,6 +491,7 @@ export default function Home() {
     try {
       const removed = await supabaseRequest("rpc/delete_review", { method: "POST", body: JSON.stringify({ p_id: review.id, p_password_hash: passwordHash }) });
       if (removed !== true) return setNotice("삭제하지 못했어요. 비밀번호 또는 리뷰 존재 여부를 확인해 주세요.");
+      dataVersions.current.reviews += 1;
       setReviews((items) => items.filter((item) => item.id !== review.id));
       if (editingReview?.id === review.id) setEditingReview(null);
       setNotice("리뷰를 삭제했어요.");
@@ -493,6 +515,7 @@ export default function Home() {
           body: JSON.stringify({ p_id: editingPost.id, p_author: author, p_title: title, p_content: content, p_password_hash: passwordHash }),
         });
         if (updated !== true) return setNotice("수정하지 못했어요. 비밀번호 또는 게시글 존재 여부를 확인해 주세요.");
+        dataVersions.current.posts += 1;
         setPosts((items) => items.map((post) => post.id === editingPost.id ? { ...post, title, content, author } : post));
         setNotice("게시글을 수정했어요.");
       } else {
@@ -507,6 +530,7 @@ export default function Home() {
         };
         const saved = await supabaseRequest("posts", { method: "POST", body: JSON.stringify(post) });
         requireSavedRow(saved, post.id);
+        dataVersions.current.posts += 1;
         setPosts((items) => [post, ...items]);
         setNotice("게시글을 등록했어요.");
       }
@@ -534,6 +558,7 @@ export default function Home() {
         });
         if (removed !== true) return setNotice("삭제하지 못했어요. 비밀번호 또는 게시글 존재 여부를 확인해 주세요.");
       }
+      dataVersions.current.posts += 1;
       setPosts((items) => items.filter((item) => item.id !== post.id));
       if (editingPost?.id === post.id) {
         setEditingPost(null);
