@@ -33,6 +33,7 @@ async function harness({ configured = true, admin = true, initialRating = 0, oth
   const delayedSaves = [];
   const delayedLists = Object.fromEntries(['restaurants', 'posts', 'reviews', 'ratings'].map(key => [key, []]));
   const listReads = [];
+  const readSelections = [];
   let readFailures = new Set(initialReadFailures);
   const delay = (queue) => {
     let resolve, reject;
@@ -71,7 +72,13 @@ async function harness({ configured = true, admin = true, initialRating = 0, oth
       const heldRead = delayedReads.shift();
       return response(heldRead ? await heldRead.promise : storedRatings.get(restaurantId) || 0);
     }
-    if (method === 'GET') return readList(path, db[path]);
+    if (method === 'GET') {
+      const select = parsed.searchParams.get('select');
+      readSelections.push({ table: path, select });
+      // Match PostgREST projections, including older DB columns not used by UI.
+      const rows = select && select !== '*' ? db[path].map(row => Object.fromEntries(select.split(',').map(field => [field, row[field]]))) : db[path];
+      return readList(path, rows);
+    }
     writes.push({ path, method, body: init.body ? JSON.parse(init.body) : null });
     if (failure === 'network') throw new TypeError('Network unavailable');
     if (failure === 'http') return response({ message: 'Service unavailable' }, 503);
@@ -98,7 +105,10 @@ async function harness({ configured = true, admin = true, initialRating = 0, oth
       }
       return response(true);
     }
-    if (method === 'POST') { db[path].push(body); return response([body]); }
+    if (method === 'POST') {
+      const saved = path === 'posts' ? { views: 0, ...body } : body;
+      db[path].push(saved); return response([saved]);
+    }
     const id = parsed.searchParams.get('id')?.replace('eq.', '');
     const row = db[path].find(item => item.id === id);
     if (!row) return response([]);
@@ -162,7 +172,7 @@ async function harness({ configured = true, admin = true, initialRating = 0, oth
     await act(async () => { for (let i = 0; i < times; i++) button.click(); }); await flush();
   };
   await mount();
-  return { db, writes, readRequests, listReads, heldInitialLists, mount, click, openReview, form, fill, submit, rate, retry, flush, fail: value => { failure = value; },
+  return { db, writes, readRequests, listReads, readSelections, heldInitialLists, mount, click, openReview, form, fill, submit, rate, retry, flush, fail: value => { failure = value; },
     deferRatingRead: () => delay(delayedReads), deferRatingSave: () => delay(delayedSaves),
     deferListRead: resource => delay(delayedLists[resource]), failLists: resources => { readFailures = new Set(resources); },
     ratingReply: value => { hasRatingReply = true; ratingReply = value; },
@@ -652,5 +662,52 @@ test('list race: responses from an unmounted page do not change a freshly mounte
     await oldRead.resolve([{ ...initialPost, title: '이전 화면 데이터' }]);
     assert.equal(document.querySelector('.post h3').textContent, '새 화면 데이터');
     assert.ok(document.body.textContent.includes('공용 데이터 연결됨'));
+  } finally { await h.close(); }
+});
+
+test('board: legacy view counts are not displayed while title, full body, author and date remain visible', async () => {
+  const h = await harness();
+  try {
+    h.db.posts[0].views = 37; await h.mount(); await h.click(/^자유게시판/);
+    assert.equal(document.querySelector('.post h3').textContent, '기존 글');
+    assert.equal(document.querySelector('.postMain > p').textContent, '기존 본문');
+    const meta = document.querySelector('.postMeta').textContent;
+    assert.ok(meta.includes('작성자')); assert.match(meta, /11월 4일/);
+    assert.doesNotMatch(meta, /조회|37/);
+    const reads = h.readSelections.filter(request => request.table === 'posts');
+    assert.ok(reads.length > 0);
+    assert.ok(reads.every(request => !request.select.split(',').includes('views')));
+    assert.equal(h.db.posts[0].views, 37);
+  } finally { await h.close(); }
+});
+
+test('board: repeated visits and a fresh mount perform no view-count writes', async () => {
+  const h = await harness();
+  try {
+    h.db.posts[0].views = 37;
+    for (let visit = 0; visit < 3; visit++) {
+      await h.click(/^자유게시판/); await h.click('맛집 찾기');
+    }
+    await h.mount(); await h.click(/^자유게시판/);
+    assert.equal(h.writes.length, 0);
+    assert.equal(h.db.posts[0].views, 37);
+    assert.doesNotMatch(document.querySelector('.postMeta').textContent, /조회/);
+  } finally { await h.close(); }
+});
+
+test('board: creation relies on DB defaults and editing leaves existing view counts untouched', async () => {
+  const h = await harness();
+  try {
+    h.db.posts[0].views = 37;
+    await entities.post.open(h); h.fill(entities.post.values); await h.submit();
+    const insert = h.writes.find(request => request.path === 'posts' && request.method === 'POST');
+    assert.ok(insert); assert.ok(!Object.hasOwn(insert.body, 'views'));
+    assert.equal(h.db.posts.find(row => row.title === '새 글').views, 0);
+    await h.mount(); await entities.post.edit(h);
+    h.fill({ title: '본문 목록 유지', password: 'test-password' }); await h.submit();
+    assert.equal(h.db.posts[0].views, 37);
+    await h.mount(); await h.click(/^자유게시판/);
+    assert.ok(document.body.textContent.includes('본문 목록 유지'));
+    assert.doesNotMatch(document.querySelector('.postMeta').textContent, /조회/);
   } finally { await h.close(); }
 });

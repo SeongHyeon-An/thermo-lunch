@@ -22,7 +22,6 @@ type Post = {
   author: string;
   password_hash?: string;
   created_at: string;
-  views: number;
 };
 
 type Review = {
@@ -217,7 +216,7 @@ export default function Home() {
     }
     const results = await Promise.allSettled([
       loadList("restaurants", "restaurants?select=*&order=distance.asc", setRestaurants),
-      loadList("posts", "posts?select=id,title,content,author,created_at,views&order=created_at.desc", setPosts),
+      loadList("posts", "posts?select=id,title,content,author,created_at&order=created_at.desc", setPosts),
       loadList("reviews", "reviews?select=id,restaurant_id,author,content,created_at&order=created_at.desc", setReviews),
       loadList("ratings", "rpc/get_rating_summaries", setRatingSummaries, { method: "POST", body: "{}" }),
     ]);
@@ -526,7 +525,6 @@ export default function Home() {
           author,
           password_hash: passwordHash,
           created_at: new Date().toISOString(),
-          views: 0,
         };
         const saved = await supabaseRequest("posts", { method: "POST", body: JSON.stringify(post) });
         requireSavedRow(saved, post.id);
@@ -740,7 +738,7 @@ export default function Home() {
               {posts.map((post, index) => (
                 <article className="post" key={post.id}>
                   <span className="postNumber">{String(posts.length - index).padStart(2, "0")}</span>
-                  <div className="postMain"><h3>{post.title}</h3><p>{post.content}</p><div className="postMeta"><span>{post.author}</span><span>{formatDate(post.created_at)}</span><span>조회 {post.views}</span></div></div>
+                  <div className="postMain"><h3>{post.title}</h3><p>{post.content}</p><div className="postMeta"><span>{post.author}</span><span>{formatDate(post.created_at)}</span></div></div>
                   <div className="postActions">
                     <button onClick={() => openPostEdit(post)}>수정</button>
                     <button className="danger" onClick={() => removePost(post)}>삭제</button>
